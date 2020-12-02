@@ -76,7 +76,7 @@ double calcinnerprod(int i, int j, double *c, double n0, double C, int nA, int n
 
 void task1(int L, int j0, CiDLPasses *iDL, CLTreeS *seqsTS, int M, int nThreads)
 {
-	//    sprintf(globtmpstr,"started pass %d out of %d.\n",j+1,iDL->M);Printf(globtmpstr);
+	//sprintf(globtmpstr,"started pass %d out of %d.\n",j+1,iDL->M);Printf(globtmpstr);
 	for(int j=0;j<M;j++) if((j%nThreads)==j0){
 		
 		printf("Thread %d, started pass %d out of %d.\n",j0+1, (j-j0)/nThreads+1,1+(M-j0-1)/nThreads);
@@ -96,26 +96,11 @@ void task1(int L, int j0, CiDLPasses *iDL, CLTreeS *seqsTS, int M, int nThreads)
 			seqsTSj->DFSTiDL(&seqsTSj,1, &zero, iDL->passTrees+j, 0, globalConverter.b);
 		seqsTSj->deleteTree(L, globalConverter.b, 1);
 		delete seqsTSj;
-		
-		// print mismatch profile:
-		/* for(int si=0;si<nseqs; si++){
-		for(int sj=0;sj<nseqs;sj++){
-		printf("\n (s%d, s%d) = ",si,sj);
-		for(int dd = 0; dd<=gMAXMM; dd++){
-		printf("%d ",gMMProfile[si][dd][sj]);
-		}
-		}
-	}
-		*/
-		
-		
-		//}
 		delete []tmpArray1;
 		delete []tmpArray2;
-		//sprintf(globtmpstr,"ended pass %d out of %d.\n",j+1,iDL->M);Printf(globtmpstr);
-		}
-	
+	//sprintf(globtmpstr,"ended pass %d out of %d.\n",j+1,iDL->M);Printf(globtmpstr);
 	}
+}
 
 // Maing Kernel
 void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kmat, int *narr)
