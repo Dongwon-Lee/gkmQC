@@ -594,38 +594,38 @@ void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kmat, int *narr)
 	double *norm = new double [nseqs]; 
 
     for(i=0;i<nseqs;i++)
-    {
-        if (usePseudocnt)
-        {
-            norm[i] = sqrt(calcinnerprod(i,i,c,n0,C,LmersCnt[i], LmersCnt[i], btL));
-        }
-        else
-        {
-            norm[i] = sqrt(calcinnerprod(i,i,c));
-        }
-    }
-    
-    for(i=0;i<nseqs;i++)
-    {	
-        for(int j=0;j<nseqs;j++)
-        {
-            if(i>j)
-            {
-                if (usePseudocnt)
-                {
-                    kmat[i][j] = norm[i]*norm[j]<1E-50)?0.0:calcinnerprod(i,j,c, n0,C,LmersCnt[i], LmersCnt[j], btL)/(norm[i]*norm[j])
-                }
-                else
-                {
-                    kmat[i][j] = norm[i]*norm[j]<1E-50)?0.0:calcinnerprod(i,j,c)/(norm[i]*norm[j])
-                }			
-            }
-            else if (i==j) 
-            {
-                kmat[i][j] = 1.0
-            }
-        }
-    }	
+	{
+		if (usePseudocnt)
+		{
+			norm[i] = sqrt(calcinnerprod(i,i,c,n0,C,LmersCnt[i], LmersCnt[i], btL));
+		}
+		else
+		{
+			norm[i] = sqrt(calcinnerprod(i,i,c));
+		}
+	}
+	
+	for(i=0;i<nseqs;i++)
+	{	
+		for(int j=0;j<nseqs;j++)
+		{
+			if(i>j)
+			{
+				if (usePseudocnt)
+				{
+					kmat[i][j] = norm[i]*norm[j]<1E-50)?0.0:calcinnerprod(i,j,c, n0,C,LmersCnt[i], LmersCnt[j], btL)/(norm[i]*norm[j])
+					}
+				else
+				{
+					kmat[i][j] = norm[i]*norm[j]<1E-50)?0.0:calcinnerprod(i,j,c)/(norm[i]*norm[j])
+				}			
+			}
+			else if (i==j) 
+			{
+				kmat[i][j] = 1.0
+			}
+		}
+	}	
 	
 	// pass the number of sequences to python
 	narr[0] = npos
