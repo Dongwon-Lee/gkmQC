@@ -25,15 +25,14 @@ typedef struct {
 	int useTgkm;
 	bool addRC;
 	bool usePseudocnt;
-	bool OutputBinary;
 	char *posfile;
 	char *negfile;
 	double wildcardLambda;  // Parameter lambda for (LK2004)
 	int wildcardMismatchM;  // Parameter M for wildcard or mismatch kernels (LK2004)
-	char *alphabetFN;       // Alphabets file name
 	int maxnThread;         // Max number of threads
+	int dummyVal;
 } OptsGkmKernel;
 
 double calcinnerprod(int i, int j, double *c, double n0, double C, int nA, int nB, double btL);
 void task1(int L, int j0, CiDLPasses *iDL, CLTreeS *seqsTS, int M, int nThreads);
-void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kernMat, int *nseqArr);
+void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kmat, int *narr);

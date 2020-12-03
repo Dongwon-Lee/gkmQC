@@ -124,6 +124,8 @@ void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kmat, int *narr)
 	
 	char **seqname = new char *[nMAXSEQUENCES];
 	
+	printf("L = %d, K = %d, d = %d, maxnThread = %d, useTgkm = %d", L, K, maxnmm, opt.maxnThread, opt.useTgkm); // debug code
+	
 	CCalcWmML wmc(L, K, globalConverter.b);
 	//double *kernel = wmc.kernelTruncated;
 	if (maxnmm==-1)
@@ -233,7 +235,7 @@ void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kmat, int *narr)
 	if (sfi == NULL)
 	{
 		perror ("error occurred while opening a file");
-		return 0;
+		return;
 	}
 	
 	char *tmpSeq=new char[maxseqlen+3];
@@ -463,6 +465,7 @@ void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kmat, int *narr)
 		if(nThreads==0){nThreads = iDL.M;}
 		if(nThreads>iDL.M){nThreads =iDL.M;}
 		nThreads = iDL.M/(int)(iDL.M/nThreads);
+		printf("maxnThreads = %d", opt.maxnThread); // debug code
 		if(opt.maxnThread<nThreads){nThreads=opt.maxnThread;}
 		
 		if (nThreads<=1){
@@ -590,6 +593,7 @@ void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kmat, int *narr)
 		}
 	}
 	
+	printf("start pairwise calculation"); // debug code
 	for(i=0;i<nseqs;i++)
 	{	
 		for(int j=0;j<nseqs;j++)
@@ -598,23 +602,24 @@ void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kmat, int *narr)
 			{
 				if (usePseudocnt)
 				{
-					kmat[i][j] = norm[i]*norm[j]<1E-50)?0.0:calcinnerprod(i,j,c, n0,C,LmersCnt[i], LmersCnt[j], btL)/(norm[i]*norm[j])
+					kmat[i][j] = (norm[i]*norm[j]<1E-50)?0.0:calcinnerprod(i,j,c, n0,C,LmersCnt[i], LmersCnt[j], btL)/(norm[i]*norm[j]);
 					}
 				else
 				{
-					kmat[i][j] = norm[i]*norm[j]<1E-50)?0.0:calcinnerprod(i,j,c)/(norm[i]*norm[j])
+					kmat[i][j] = (norm[i]*norm[j]<1E-50)?0.0:calcinnerprod(i,j,c)/(norm[i]*norm[j]);
 				}			
 			}
 			else if (i==j) 
 			{
-				kmat[i][j] = 1.0
+				kmat[i][j] = 1.0;
 			}
 		}
 	}	
 	
 	// pass the number of sequences to python
-	narr[0] = npos
-	narr[1] = nneg
+	narr[0] = npos;
+	narr[1] = nneg;
+	printf("narr[0]: %d, narr[1]: %d", narr[0], narr[1]); // debug code
 
 	delete []norm;
 	delete []LmersCnt;
@@ -644,3 +649,9 @@ void gkmKernelSuffixTree(OptsGkmKernel &opt, double **kmat, int *narr)
 	
 	return;
 }
+
+extern "C" {
+	void gkmKernelCWrapper(OptsGkmKernel &opt, double **kmat, int *narr) {
+		gkmKernelSuffixTree(opt, kmat, narr);
+	}
+} 
