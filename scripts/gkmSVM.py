@@ -34,19 +34,19 @@ from itertools import repeat
 ##
 class OptsGkmKernel(ctypes.Structure):
     _fields_ = (
-        ('L', ctypes.c_int),                                 # L = 10       : set word length
-        ('K', ctypes.c_int),                                 # k = 6        : set number of informative columns
-        ('maxnmm', ctypes.c_int),                            # d = 3        : set maximum number of mismatches to consider
-        ('maxseqlen', ctypes.c_int),                         # 10000        : set maximum sequence length in the sequence files
-        ('maxnumseq', ctypes.c_int),                         # 10000000     : set maximum number of sequences in the sequence files
-        ('useTgkm', ctypes.c_int),                           # 1            : set filter type: 0(use full filter), 1(use truncated filter
-        ('addRC', ctypes.c_bool),                            # TRUE         : if FALSE, reverse complement sequences will NOT be considered\
-        ('usePseudocnt', ctypes.c_bool),                     # FALSE        : if set, a constant to will be added to the count estimates
-        ('posfile', ctypes.c_char_p),          # filename1    : positive seq fa loc
-        ('negfile', ctypes.c_char_p),          # filename2    : negative seq fa loc
-        ('wildcardLambda', ctypes.c_double),                 # 1.0          : lambda for wildcard kernel, defaul=1.0
-        ('wildcardMismatchM', ctypes.c_int),                 # 2            : max mismatch for Mismatch kernel or wildcard kernel, default=2
-        ('maxnThread', ctypes.c_int),                        # 1000         : maximum number of threads, defaul = 2 * L
+        ('L', ctypes.c_int),         # L = 10 ## default values
+        ('K', ctypes.c_int),         # k = 6
+        ('maxnmm', ctypes.c_int),    # d = 3
+        ('maxseqlen', ctypes.c_int),
+        ('maxnumseq', ctypes.c_int),
+        ('useTgkm', ctypes.c_int),
+        ('addRC', ctypes.c_bool),
+        ('usePseudocnt', ctypes.c_bool),
+        ('posfile', ctypes.POINTER(ctypes.c_char)),
+        ('negfile', ctypes.POINTER(ctypes.c_char)),
+        ('wildcardLambda', ctypes.c_double),
+        ('wildcardMismatchM', ctypes.c_int),
+        ('maxnThread', ctypes.c_int),
         ('dummyVal', ctypes.c_int),
     )
 
@@ -55,17 +55,16 @@ class OptsGkmKernel(ctypes.Structure):
 # (using optimized algorithm in gkmSVM-2.0)
 ##
 def computeGkmKernel(opts_arg):
-    opts = OptsGkmKernel(*opts_arg[:len(OptsGkmKernel._fields_)]) # TODO: ctypes.c_char_p(b' text ')
+    opts = OptsGkmKernel(*opts_arg[:len(OptsGkmKernel._fields_)])
     nseq = opts.maxnumseq # max_n = 15,000 (= 7500 x 2)
 
-    # makes 2D-numpy matrix object compatible with double ** in ctypes
-    # store kernal matrix (nseq x nseq)
+    # create blank numpy obj with aligned memory addr
+    # (to be compatible with double ** in ctype func)
+    # enables call by reference for np.mat variable
     kmat = np.zeros(shape=(nseq, nseq))
+    narr = np.zeros(shape=(2, 1))
     kmat_p = (kmat.ctypes.data + np.arange(kmat.shape[0]) * kmat.strides[0]).astype(np.uintp)
     array_2d_double = np.ctypeslib.ndpointer(dtype=np.uintp, ndim=1, flags='C')
-
-    # for 1D-numpy array (store num of sequences; pos, neg)
-    narr = np.array([0, 0])
     array_1d_int = np.ctypeslib.ndpointer(dtype=np.int, ndim=1, flags='C')
 
     # call ctype func in ../bin/GkmKernel.so
@@ -88,7 +87,7 @@ def crossValidate(kmat, n_pseqs, n_nseqs, ncv, nu_auc_regressor):
     # Answer set
     seqids = \
         list(map(lambda x: "p%4d" % x, range(n_pseqs))) +\
-        list(map(lambda x: "n%4d" % x, range(n_nseqs)))
+        list(map(lambda x: "p%4d" % x, range(n_nseqs)))
     y = np.concatenate(np.repeat(1, n_pseqs), np.repeat(0, n_nseqs))
 
     # Normal mode: 5-fold cross-validation
@@ -99,16 +98,10 @@ def crossValidate(kmat, n_pseqs, n_nseqs, ncv, nu_auc_regressor):
         mean_fpr = np.linspace(0, 1, 100)
 
         for trainIdx, testIdx in kf.split(seqids):
-
-            # slice y-label dataset
             y_train, y_test = y[trainIdx], y[testIdx]
-
-            # slice kernel matrix
-            k_train = kmat[trainIdx, :][:, trainIdx] 
+            k_train = kmat[trainIdx, :][:, trainIdx]
             k_test  = kmat[trainIdx, :][:, testIdx]
-
-            # training and test
-            sv = SVC(kernel="precomputed", C=1.0, tol=1e-3, shrinking=False, gamma=1.0, cache_size=256) # q: tolerance?
+            sv = SVC(kernel="precomputed", C=1.0, tol=1e-3, shrinking=False, gamma=1.0, cache_size=256)
             y_prob_ = sv.fit(k_train, y_train).predict_proba(k_test)
             #y_pred = sv.predict(k_test)
 
@@ -128,7 +121,7 @@ def crossValidate(kmat, n_pseqs, n_nseqs, ncv, nu_auc_regressor):
     # Fast mode: AUC estimation based on nu values from single training
     # using Gradient-boost regressor
     else:
-        sv = SVC(kernel="precomputed", C=1.0, tol=1e-3, shrinking=False, gamma=1.0, cache_size=256) # TODO: fit param 
+        sv = SVC(kernel="precomputed", C=1.0, tol=1e-3, shrinking=False, gamma=1.0, cache_size=256) # TODO: fit param
         sv.fit(kmat, y)
         auc_score = nu_auc_regressor.predict(np.atleast_2d([sv.nu]).T)[0]
 

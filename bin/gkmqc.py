@@ -74,7 +74,7 @@ def main():
     global HEADER
 
     desc_txt="perform quality evaluation of open-chromatin peaks\
-    sequence-based predictive model with gapped-kmer kernels (Ghandi et al. 2016; Lee 2016). \
+    sequence-based predictive model  with gapped-kmer kernels (Ghandi et al. 2014; Lee 2016). \
     LIBSVM (Chang & Lin 2011) was used for implementing SVR. \
     -- by Seong Kyu Han (seongkyu.han@childrens.harvard.edu), Dongwon Lee (dongwon.lee@childrens.harvard.edu)"
 
