@@ -28,26 +28,49 @@ from sklearn.metrics import roc_curve, auc
 from sklearn.ensemble import GradientBoostingRegressor
 from itertools import repeat
 
+
+'''
+struct svm_parameter
+{
+    int svm_type;
+    int data_type;
+    int kernel_type;
+    int L;
+    int k;
+    int d;
+    uint8_t M;
+    double H;
+    double gamma;
+
+    /* these are for training only */
+    double cache_size; /* in MB */
+    double eps; /* stopping criteria */
+    double C;   /* for C_SVC, EPSILON_SVR and NU_SVR */
+    int nr_weight;      /* for C_SVC */
+    int *weight_label;  /* for C_SVC */
+    double* weight;     /* for C_SVC */
+    double nu;  /* for NU_SVC, ONE_CLASS, and NU_SVR */
+    double p;   /* for EPSILON_SVR */
+    int shrinking;  /* use the shrinking heuristics */
+    int probability; /* do probability estimates */
+};
+'''
+
 ##
 # Options for GKM Kernel 
 # Ctype-compatible python class
 ##
-class OptsGkmKernel(ctypes.Structure):
+class svmParam(ctypes.Structure):
     _fields_ = (
-        ('L', ctypes.c_int),         # L = 10 ## default values
-        ('K', ctypes.c_int),         # k = 6
-        ('maxnmm', ctypes.c_int),    # d = 3
-        ('maxseqlen', ctypes.c_int),
-        ('maxnumseq', ctypes.c_int),
-        ('useTgkm', ctypes.c_int),
-        ('addRC', ctypes.c_bool),
-        ('usePseudocnt', ctypes.c_bool),
-        ('posfile', ctypes.POINTER(ctypes.c_char)),
-        ('negfile', ctypes.POINTER(ctypes.c_char)),
-        ('wildcardLambda', ctypes.c_double),
-        ('wildcardMismatchM', ctypes.c_int),
-        ('maxnThread', ctypes.c_int),
-        ('dummyVal', ctypes.c_int),
+        ('svm_type', ctypes.c_int),
+        ('data_type', ctypes.c_int),
+        ('kernel_type', ctypes.c_int),
+        ('L', ctypes.c_int),     # L = 10 ## default values
+        ('k', ctypes.c_int),     # k = 6
+        ('d', ctypes.c_int),     # d = 3
+        ('M', ctypes.c_uint8),
+        ('H', ctypes.c_double),
+        ('gamma', ctypes.c_double),
     )
 
 ##
@@ -55,23 +78,25 @@ class OptsGkmKernel(ctypes.Structure):
 # (using optimized algorithm in gkmSVM-2.0)
 ##
 def computeGkmKernel(opts_arg):
-    opts = OptsGkmKernel(*opts_arg[:len(OptsGkmKernel._fields_)])
-    nseq = opts.maxnumseq # max_n = 15,000 (= 7500 x 2)
+    svm_param = svmParam(*opts_arg[:len(svmParam._fields_)])
+    nseq = svm_param.maxnumseq # max_n = 15,000 (= 7500 x 2)
 
     # create blank numpy obj with aligned memory addr
     # (to be compatible with double ** in ctype func)
     # enables call by reference for np.mat variable
     kmat = np.zeros(shape=(nseq, nseq))
-    narr = np.zeros(shape=(2, 1))
     kmat_p = (kmat.ctypes.data + np.arange(kmat.shape[0]) * kmat.strides[0]).astype(np.uintp)
     array_2d_double = np.ctypeslib.ndpointer(dtype=np.uintp, ndim=1, flags='C')
+
+    narr = np.array([0, 0], dtype=np.int)
+    narr_p = ctypes.c_void_p(narr.ctypes.data)
     array_1d_int = np.ctypeslib.ndpointer(dtype=np.int, ndim=1, flags='C')
 
     # call ctype func in ../bin/GkmKernel.so
-    libgkm = np.ctypeslib.load_library("GkmKernel.so", "../bin")
-    libgkm.gkmKernelCWrapper.restype = None
-    libgkm.gkmKernelCWrapper.argtypes = (ctypes.POINTER(OptsGkmKernel), array_2d_double, array_1d_int,)
-    libgkm.gkmKernelCWrapper(opts, kmat_p, narr)
+    libgkm = np.ctypeslib.load_library("libgkmqc.so", "../bin")
+    libgkm.gkmKernelPyWrapper.restype = None
+    libgkm.gkmKernelPyWrapper.argtypes = (ctypes.POINTER(svmParam), array_2d_double, array_1d_int,)
+    libgkm.gkmKernelPyWrapper(svm_param, kmat_p, narr_p)
 
     n_pseqs = narr[0]
     n_nseqs = narr[1]
