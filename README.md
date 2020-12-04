@@ -4,9 +4,9 @@
 gkmQC is a sequence-based quality assessment and refinement of
 chromatin accessibility data using gkm-SVM.
 
-It trains a support vector regression (SVR) using gapped-kmer kernels
-(Ghandi et al., 2014; Lee, 2016), and learns sequence features that modulate
-gene expressions. We use LIBSVM (Chang & Lin 2011) for implementing SVR.
+It trains a support vector classifier (SVC) using gapped-kmer kernels
+(Ghandi et al., 2014; Lee, 2016), and evaluates the quality of learned sequence features
+to assess the open-chromatin peaks. We use LIBSVM (Chang & Lin 2011) for implementing SVC.
 
 requires sklearn, numpy working on Python 3.x
 
