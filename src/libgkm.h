@@ -22,7 +22,9 @@
 #ifndef LIBSVM_GKM_H_INCLUDED
 #define LIBSVM_GKM_H_INCLUDED
 
-#include "libsvm.h"
+//#include "libsvm.h"
+#define LOGGER_ID 0
+#define LOGGER_FORMAT "%l %d %t: %m\n"
 
 #define MAX_ALPHABET_SIZE 4 /* base ACGT, DON'T CHANGE THIS PARAMETER! */
 #define MAX_ALPHABET_SIZE_SQ 16 // MAX_ALPHABET_SIZE*MAX_ALPHABET_SIZE
@@ -38,6 +40,44 @@ typedef struct _KmerTreeLeaf KmerTreeLeaf;
 typedef struct _NodeMismatchCount NodeMismatchCount;
 typedef struct _KmerTreeCoef KmerTreeCoef;
 typedef struct _KmerTreeLeafData KmerTreeLeafData;
+typedef struct _gkm_parameter gkm_parameter;
+typedef struct _gkm_data gkm_data;
+typedef struct _svm_problem svm_problem;
+
+enum { GKM, EST_FULL, EST_TRUNC, EST_TRUNC_RBF, EST_TRUNC_PW, EST_TRUNC_PW_RBF}; /* kernel_type */
+
+struct _gkm_parameter {
+    int kernel_type;
+    int L;
+    int k;
+    int d;
+    uint8_t M;
+    double H;
+    double gamma;
+};
+
+struct _gkm_data {
+    char *sid;
+    int seqid;
+    int label;
+    int seqlen;
+    uint8_t *seq;
+    uint8_t *seq_rc;
+    uint8_t *wt;
+    uint8_t *wt_rc;
+    int *kmerids;
+    int *kmerids_rc;
+    char *seq_string;
+
+    double sqnorm;
+};
+
+struct _svm_problem
+{
+    int l;
+    double *y;
+    gkm_data **x;
+};
 
 struct _KmerTreeLeafData {
     int seqid;
@@ -66,7 +106,7 @@ struct _KmerTreeCoef {
     double *coef_sum;
 };
 
-void gkmkernel_init(struct svm_parameter *param);
+void gkmkernel_init(gkm_parameter *param);
 void gkmkernel_destroy();
 void gkmkernel_set_num_threads(int n);
 
@@ -75,23 +115,16 @@ void gkmkernel_delete_object(gkm_data* d);
 void gkmkernel_free_object(gkm_data* d);
 
 double gkmkernel_kernelfunc(const gkm_data *da, const gkm_data *db);
-double* gkmkernel_kernelfunc_batch(const gkm_data *da, const union svm_data *db_array, const int n, double *res);
+double* gkmkernel_kernelfunc_batch(const gkm_data *da, const gkm_data **db_array, const int n, double *res);
 
-void gkmkernel_init_problems(union svm_data *x, int n);
+void gkmkernel_init_problems(gkm_data **x, int n);
 void gkmkernel_destroy_problems();
 void gkmkernel_swap_index(int i, int j);
 void gkmkernel_update_index();
 double* gkmkernel_kernelfunc_batch_all(const int a, const int start, const int end, double *res);
 
-void gkmkernel_init_sv(union svm_data *sv, double *coef, int nclass, int n);
 void gkmkernel_destroy_sv();
 double* gkmkernel_kernelfunc_batch_sv(const gkm_data *d, double *res);
-
-void gkmkernel_init_predict(union svm_data *sv, double *alpha, int nclass, int n);
-double gkmkernel_predict(const gkm_data *d);
-
-int svm_save_model(const char *model_file_name, const struct svm_model *model);
-svm_model *svm_load_model(const char *model_file_name);
 
 
 #ifdef __cplusplus

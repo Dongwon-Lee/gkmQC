@@ -1,6 +1,6 @@
 /* libgkm.c
  *
- * Copyright (C) 2015 Dongwon Lee
+ * Copyright (C) 2020 Dongwon Lee
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@
 #define LEAF_COUNT(a) (1<<(2*a))  
 #define NODE_COUNT(a) ((1<<(2*a))-1)/(MAX_ALPHABET_SIZE-1); // (x^n-1)/(x-1) = 1 + x + x^2 + ... x^(n-1)
 
-static struct svm_parameter *g_param = NULL;
+static gkm_parameter *g_param = NULL;
 static int g_param_nthreads = 1;
 
 //static double g_param_lambda = 1.0;
@@ -46,16 +46,10 @@ static double g_weights[MAX_MM+1] = {0.0};
 static KmerTree *g_kmertree = NULL;
 
 static KmerTree *g_prob_kmertree = NULL;
-static union svm_data *g_prob_svm_data = NULL;
+static gkm_data **g_prob_svm_data = NULL;
 static int g_prob_num = 0;
 static int *g_prob_gkmkernel_index = NULL;
 static int *g_prob_libsvm_index = NULL;
-
-static KmerTree *g_sv_kmertree = NULL;
-static union svm_data *g_sv_svm_data = NULL;
-static int g_sv_num = 0;
-
-static KmerTreeCoef *g_sv_kmertreecoef = NULL;
 
 static uint8_t *g_mmcnt_lookuptab = NULL;
 static int g_mmcnt_lookuptab_mask = 0;
@@ -76,14 +70,6 @@ typedef struct _kmertree_dfs_pthread_t {
     int **mmprofile;
     int last_seqid;
 } kmertree_dfs_pthread_t;
-
-typedef struct _kmertreecoef_dfs_pthread_t{
-    int start_depth;
-    int start_node_index;
-    BaseMismatchCount matching_bases[MAX_SEQ_LENGTH];
-    int num_matching_bases;
-    double result;
-} kmertreecoef_dfs_pthread_t;
 
 typedef struct _kernelfunc_sqnorm_pthread_t {
     int *twobitids;
@@ -590,235 +576,6 @@ static void kmertree_dfs_pthread_process(kmertree_dfs_pthread_t *td, const int n
 
 }
 
-/**************************
- * kmertreecoef functions *
- **************************/
-static void kmertreecoef_init(KmerTreeCoef *tree, int kmerlen)
-{
-    int i;
-    tree->depth = kmerlen;
-    tree->node_count = NODE_COUNT(kmerlen);
-    tree->leaf_count = LEAF_COUNT(kmerlen);
-    tree->coef_sum = (double *) malloc(sizeof(double) * ((size_t) tree->leaf_count));
-
-    for (i=0; i<tree->leaf_count; i++) { tree->coef_sum[i] = 0; }
-}
-
-static void kmertreecoef_destroy(KmerTreeCoef *tree)
-{
-    if (tree) {
-        free(tree->coef_sum);
-        free(tree);
-    }
-}
-
-static double kmertreecoef_dfs(const KmerTreeCoef *tree, const int depth, const int curr_node_index, const BaseMismatchCount *curr_matching_bases, const int curr_num_matching_bases)
-{
-    int j;
-    int bid;
-    double result = 0;
-    const int d = g_param->d;
-
-    if (depth == tree->depth - 1) {
-        const double *coef= tree->coef_sum + (curr_node_index*MAX_ALPHABET_SIZE) - tree->node_count;
-
-        //speed-up (~20%) by rearranging the double-loop and pre-calculation
-        for (j=0; j<curr_num_matching_bases; j++) {
-            const BaseMismatchCount *currbase = curr_matching_bases+j;
-            const uint8_t currbase_bid = *currbase->bid;
-            const int currbase_mmcnt = currbase->mmcnt;
-            const double currbase_mmcnt_wt0 = g_weights[currbase_mmcnt] * currbase->wt;
-            const double currbase_mmcnt_wt1 = g_weights[currbase_mmcnt+1] * currbase->wt;
-            for (bid=1; bid<=MAX_ALPHABET_SIZE; bid++) {
-                if (currbase_bid == bid) {
-                    // matching
-                    result += (coef[bid] * currbase_mmcnt_wt0);
-                } else if (currbase_mmcnt < d) {
-                    // non-matching
-                    result += (coef[bid] * currbase_mmcnt_wt1);
-                }
-            }
-        }
-
-        return result;
-    } else {
-        int daughter_node_index = (curr_node_index*MAX_ALPHABET_SIZE);
-        for (bid=1; bid<=MAX_ALPHABET_SIZE; bid++) {
-            daughter_node_index++;
-            BaseMismatchCount next_matching_bases[MAX_SEQ_LENGTH];
-            int next_num_matching_bases = 0;
-            for (j=0; j<curr_num_matching_bases; j++) {
-                uint8_t *currbase_ptr = curr_matching_bases[j].bid;
-                int currbase_mmcnt = curr_matching_bases[j].mmcnt;
-                if (*currbase_ptr == bid) {
-                    // matching
-                    next_matching_bases[next_num_matching_bases].bid = currbase_ptr+1;
-                    next_matching_bases[next_num_matching_bases].wt = curr_matching_bases[j].wt;
-                    next_matching_bases[next_num_matching_bases].mmcnt = currbase_mmcnt;
-                    next_num_matching_bases++;
-                } else if (currbase_mmcnt < d) {
-                    // non-matching
-                    next_matching_bases[next_num_matching_bases].bid = currbase_ptr+1;
-                    next_matching_bases[next_num_matching_bases].wt = curr_matching_bases[j].wt;
-                    next_matching_bases[next_num_matching_bases].mmcnt = currbase_mmcnt+1;
-                    next_num_matching_bases++;
-                }
-            }
-
-            if (next_num_matching_bases > 0) {
-                result += kmertreecoef_dfs(tree, depth+1, daughter_node_index, next_matching_bases, next_num_matching_bases);
-            } 
-        }
-        return result;
-    }
-}
-
-static double kmertreecoef_dfs_single(const gkm_data *da)
-{
-    int i;
-    BaseMismatchCount matching_bases[MAX_SEQ_LENGTH];
-    int num_matching_bases = da->seqlen - g_param->L + 1;
-
-    for (i=0; i<num_matching_bases; i++) {
-        matching_bases[i].bid = da->seq + i;
-        matching_bases[i].wt = da->wt[i];
-        matching_bases[i].mmcnt = 0;
-    }
-
-    return kmertreecoef_dfs(g_sv_kmertreecoef, 0, 0, matching_bases, num_matching_bases);
-}
-
-static void kmertreecoef_dfs_pthread_init_par4(const gkm_data *da, kmertreecoef_dfs_pthread_t *td)
-{
-    int i, j;
-    const int d= g_param->d;
-
-    //process the first level and initialize thread input & output variables
-    for (i=0; i<MAX_ALPHABET_SIZE; i++) {
-        //input
-        int bid = i + 1;
-        td[i].start_depth = 1;
-        td[i].start_node_index = bid;
-        td[i].num_matching_bases = 0;
-
-        uint8_t *seq = da->seq;
-        uint8_t *wt = da->wt;
-        for (j=0; j<da->seqlen - g_param->L + 1; j++) {
-            int mmcnt = 0;
-            uint8_t *currbase_ptr = seq + j;
-            if (*currbase_ptr != bid) mmcnt++;
-            if (mmcnt <= d) {
-                td[i].matching_bases[td[i].num_matching_bases].bid = currbase_ptr + 1;
-                td[i].matching_bases[td[i].num_matching_bases].wt = wt[j];
-                td[i].matching_bases[td[i].num_matching_bases].mmcnt = mmcnt;
-                td[i].num_matching_bases++;
-            }
-        }
-
-        //output
-        td[i].result = 0;
-    }
-}
-
-static void kmertreecoef_dfs_pthread_init_par16(const gkm_data *da, kmertreecoef_dfs_pthread_t *td)
-{
-    int i, j;
-    const int d = g_param->d;
-
-    //process the first TWO level and initialize thread input & output variables
-    for (i=0; i<MAX_ALPHABET_SIZE * MAX_ALPHABET_SIZE; i++) {
-        //input
-        int bid1 = (i>>2) + 1;
-        int bid2 = (i%4) + 1;
-        td[i].start_depth = 2;
-        td[i].start_node_index = MAX_ALPHABET_SIZE + i + 1;
-        td[i].num_matching_bases = 0;
-
-        uint8_t *seq = da->seq;
-        uint8_t *wt = da->wt;
-        for (j=0; j<da->seqlen - g_param->L + 1; j++) {
-            int mmcnt = 0;
-            uint8_t *base_ptr1 = seq + j;
-            uint8_t *base_ptr2 = base_ptr1 + 1;
-            if (*base_ptr1 != bid1) mmcnt++;
-            if (*base_ptr2 != bid2) mmcnt++;
-            if (mmcnt <= d) {
-                td[i].matching_bases[td[i].num_matching_bases].bid = base_ptr2 + 1;
-                td[i].matching_bases[td[i].num_matching_bases].wt = wt[j];
-                td[i].matching_bases[td[i].num_matching_bases].mmcnt = mmcnt;
-                td[i].num_matching_bases++;
-            }
-        }
-
-        //output
-        td[i].result = 0;
-    }
-}
-
-static void *kmertreecoef_dfs_pthread(void *ptr)
-{
-    kmertreecoef_dfs_pthread_t *td = (kmertreecoef_dfs_pthread_t *) ptr;
-
-    td->result = kmertreecoef_dfs(g_sv_kmertreecoef, td->start_depth, td->start_node_index, td->matching_bases, td->num_matching_bases);
-
-    return 0;
-}
-
-static double kmertreecoef_dfs_pthread_process(kmertreecoef_dfs_pthread_t *td, const int nthreads)
-{
-    int i;
-    pthread_t threads[MAX_ALPHABET_SIZE_SQ];
-    int rc[MAX_ALPHABET_SIZE_SQ];
-
-    //run threads. i=0 will be executed later in the main process
-    for (i=1; i<nthreads; i++) {
-        rc[i] = pthread_create(&threads[i], NULL, kmertreecoef_dfs_pthread, (void *) &td[i]);
-        if (rc[i]) {
-            clog_error(CLOG(LOGGER_ID), "failed to create thread %d. pthread_create() returned %d", i, rc[i]);
-        } else {
-            clog_trace(CLOG(LOGGER_ID), "thread %d was created", i);
-        }
-    }
-
-    //collect results
-    double res = 0;
-    for (i=0; i<nthreads; i++) {
-        if (i == 0) {
-            kmertreecoef_dfs_pthread(&td[i]);
-        } else {
-            if (rc[i] == 0) {
-                //wait thread return
-                pthread_join(threads[i], NULL);
-            } else {
-                //if failed to run thread, execute the function in the main process
-                kmertreecoef_dfs_pthread(&td[i]);
-            }
-        }
-
-        res += td[i].result;
-    }
-
-    return res;
-}
-
-static double kmertreecoef_dfs_par4(const gkm_data *da)
-{
-    kmertreecoef_dfs_pthread_t td[MAX_ALPHABET_SIZE];
-
-    kmertreecoef_dfs_pthread_init_par4(da, td);
-
-    return kmertreecoef_dfs_pthread_process(td, MAX_ALPHABET_SIZE);
-}
-
-static double kmertreecoef_dfs_par16(const gkm_data *da)
-{
-    kmertreecoef_dfs_pthread_t td[MAX_ALPHABET_SIZE_SQ];
-
-    kmertreecoef_dfs_pthread_init_par16(da, td);
-
-    return kmertreecoef_dfs_pthread_process(td, MAX_ALPHABET_SIZE_SQ);
-}
-
 /***************************************
  * gkmkernel internal kernel functions *
  ***************************************/
@@ -904,7 +661,7 @@ static void gkmkernel_build_mmcnt_lookuptable()
 {
     int i, j;
     int mask = 3;
-    int tablesize = (1<<(MMCNT_LOOKUPTAB_WIDTH*2));
+    unsigned int tablesize = (1<<(MMCNT_LOOKUPTAB_WIDTH*2));
 
     g_mmcnt_lookuptab = (uint8_t *) malloc(sizeof(uint8_t) * tablesize);
 
@@ -1287,7 +1044,7 @@ void gkmkernel_free_object(gkm_data* d)
 }
 
 /* set the extra parameters for gkmkernel */
-void gkmkernel_init(struct svm_parameter *param)
+void gkmkernel_init(gkm_parameter *param)
 {
     int i;
 
@@ -1338,7 +1095,7 @@ void gkmkernel_init(struct svm_parameter *param)
     gkmkernel_build_mmcnt_lookuptable();
 }
 
-void gkmkernel_init_problems(union svm_data *x, int n)
+void gkmkernel_init_problems(gkm_data **x, int n)
 {
     int i;
 
@@ -1346,8 +1103,8 @@ void gkmkernel_init_problems(union svm_data *x, int n)
     g_prob_kmertree = (KmerTree *) malloc(sizeof(KmerTree));
     kmertree_init(g_prob_kmertree, g_param->L);
 
-    g_prob_svm_data = (union svm_data *) malloc(sizeof(union svm_data) * ((size_t) n));
-    memcpy((void *)g_prob_svm_data, (void *)x, sizeof(union svm_data) * ((size_t) n));
+    g_prob_svm_data = (gkm_data **) malloc(sizeof(gkm_data *) * ((size_t) n));
+    memcpy((void *)g_prob_svm_data, (void *)x, sizeof(gkm_data *) * ((size_t) n));
     g_prob_num = n;
 
     g_prob_gkmkernel_index = (int *) malloc(sizeof(int) * ((size_t) n));
@@ -1357,73 +1114,8 @@ void gkmkernel_init_problems(union svm_data *x, int n)
     for (i=0; i<n; i++) {
         g_prob_gkmkernel_index[i] = i;
         g_prob_libsvm_index[i] = i;
-        kmertree_add_sequence(g_prob_kmertree, i, x[i].d);
+        kmertree_add_sequence(g_prob_kmertree, i, x[i]);
     }
-}
-
-static void gkmkernel_add_one_sv(gkm_data *sv_i, double sv_coef, int i, int nclass)
-{
-    int j, k;
-
-    if ((nclass == 2) &&
-        (g_param->kernel_type != EST_TRUNC_RBF) &&
-        (g_param->kernel_type != EST_TRUNC_PW_RBF)) {
-
-        //add (normalized) sv coef to the corresponding leaf
-        int nkmerids = sv_i->seqlen - g_param->L + 1;
-
-        int *kmerids[2] = {sv_i->kmerids, sv_i->kmerids_rc};
-        uint8_t *wts[2] = {sv_i->wt, sv_i->wt_rc};
-        for (k=0; k<2; k++) {
-            int *kmerid = kmerids[k];
-            uint8_t *wt = wts[k];
-            for (j=0; j<nkmerids; j++) {
-                g_sv_kmertreecoef->coef_sum[kmerid[j]] += ((sv_coef*wt[j])/sv_i->sqnorm);
-            }
-        }
-    } else {
-        kmertree_add_sequence(g_sv_kmertree, i, sv_i);
-    }
-}
-
-static void gkmkernel_init_sv_kmertree_objects(int nclass)
-{
-    if ((nclass == 2) &&
-        (g_param->kernel_type != EST_TRUNC_RBF) &&
-        (g_param->kernel_type != EST_TRUNC_PW_RBF)) {
-        //speed-up for linear binary classifier with g_sv_kemrtreecoef
-        g_sv_kmertreecoef = (KmerTreeCoef *) malloc(sizeof(KmerTreeCoef));
-        kmertreecoef_init(g_sv_kmertreecoef, g_param->L);
-    } else {
-        // initialize g_sv_kmertree for non-linear cases
-        g_sv_kmertree = (KmerTree *) malloc(sizeof(KmerTree));
-        kmertree_init(g_sv_kmertree, g_param->L);
-    }
-}
-
-void gkmkernel_init_sv(union svm_data *sv, double *coef, int nclass, int n) 
-{
-    int i;
-
-    gkmkernel_init_sv_kmertree_objects(nclass);
-
-    for (i=0; i<n; i++) {
-        gkmkernel_add_one_sv(sv[i].d, coef[i], i, nclass);
-    }
-
-    g_sv_svm_data = sv;
-    g_sv_num = n;
-}
-
-void gkmkernel_destroy_sv()
-{
-    kmertree_destroy(g_sv_kmertree);
-    kmertreecoef_destroy(g_sv_kmertreecoef);
-
-    g_sv_kmertree = NULL;
-    g_sv_kmertreecoef = NULL;
-    g_sv_svm_data = NULL;
-    g_sv_num = 0;
 }
 
 void gkmkernel_destroy_problems()
@@ -1444,7 +1136,6 @@ void gkmkernel_destroy_problems()
 void gkmkernel_destroy()
 {
     gkmkernel_destroy_problems();
-    gkmkernel_destroy_sv();
 
     kmertree_destroy(g_kmertree);
 
@@ -1477,7 +1168,7 @@ void gkmkernel_update_index()
         }
     }
 
-    union svm_data *svm_data_new = (union svm_data *) malloc(sizeof(union svm_data) * ((size_t) g_prob_num));
+    gkm_data **svm_data_new = (gkm_data **) malloc(sizeof(gkm_data *) * ((size_t) g_prob_num));
     for (i=0; i<g_prob_num; i++) {
         svm_data_new[i] = g_prob_svm_data[g_prob_gkmkernel_index[i]];
     }
@@ -1508,7 +1199,7 @@ double gkmkernel_kernelfunc(const gkm_data *da, const gkm_data *db)
 }
 
 /* calculate multiple kernels when n is relatively small */
-double* gkmkernel_kernelfunc_batch(const gkm_data *da, const union svm_data *db_array, const int n, double *res) 
+double* gkmkernel_kernelfunc_batch(const gkm_data *da, const gkm_data **db_array, const int n, double *res) 
 {
     int i, j;
     struct timeval time_start, time_end;
@@ -1516,7 +1207,7 @@ double* gkmkernel_kernelfunc_batch(const gkm_data *da, const union svm_data *db_
     //add sequences to the tree
     gettimeofday(&time_start, NULL);
     for (i=0; i<n; i++) {
-        kmertree_add_sequence(g_kmertree, i, db_array[i].d);
+        kmertree_add_sequence(g_kmertree, i, db_array[i]);
     }
     gettimeofday(&time_end, NULL);
     clog_debug(CLOG(LOGGER_ID), "add sequences to kmertree (%ld ms)", diff_ms(time_end, time_start));
@@ -1530,7 +1221,7 @@ double* gkmkernel_kernelfunc_batch(const gkm_data *da, const union svm_data *db_
     //normalization
     double da_sqnorm = da->sqnorm;
     for (i=0; i<n; i++) {
-        res[i] /= (da_sqnorm*db_array[i].d->sqnorm);
+        res[i] /= (da_sqnorm*db_array[i]->sqnorm);
     }
 
     //RBF kernel
@@ -1552,7 +1243,7 @@ double* gkmkernel_kernelfunc_batch(const gkm_data *da, const union svm_data *db_
 double* gkmkernel_kernelfunc_batch_all(const int a, const int start, const int end, double *res) 
 {
     int j;
-    const gkm_data *da = g_prob_svm_data[a].d;
+    const gkm_data *da = g_prob_svm_data[a];
     struct timeval time_start, time_end;
 
     gettimeofday(&time_start, NULL);
@@ -1565,7 +1256,7 @@ double* gkmkernel_kernelfunc_batch_all(const int a, const int start, const int e
     //normalization
     double da_sqnorm = da->sqnorm;
     for (j=start; j<end; j++) {
-        res[j-start] /= (da_sqnorm*g_prob_svm_data[j].d->sqnorm);
+        res[j-start] /= (da_sqnorm*g_prob_svm_data[j]->sqnorm);
     }
 
     //RBF kernel
@@ -1579,68 +1270,6 @@ double* gkmkernel_kernelfunc_batch_all(const int a, const int start, const int e
     clog_trace(CLOG(LOGGER_ID), "DFS i=%d, start=%d, end=%d (%ld ms)", a, start, end, diff_ms(time_end, time_start));
 
     return res;
-}
-
-/* calculate multiple kernels using precomputed kmertree with SVs */
-double* gkmkernel_kernelfunc_batch_sv(const gkm_data *da, double *res) 
-{
-    if (g_sv_kmertree == NULL) {
-        clog_error(CLOG(LOGGER_ID), "kmertree for SVs has not been initialized. call gkmkernel_init_sv() first.");
-        return NULL;
-    }
-
-    int j;
-    struct timeval time_start, time_end;
-
-    gettimeofday(&time_start, NULL);
-
-    //initialize results
-    for (j=0; j<g_sv_num; j++) { res[j] = 0; }
-
-    gkmkernel_kernelfunc_batch_ptr(da, g_sv_kmertree, 0, g_sv_num, res);
-
-    //normalization
-    double da_sqnorm = da->sqnorm;
-    for (j=0; j<g_sv_num; j++) {
-        res[j] /= (da_sqnorm*g_sv_svm_data[j].d->sqnorm);
-    }
-
-    //RBF kernel
-    if (g_param->kernel_type == EST_TRUNC_RBF || g_param->kernel_type == EST_TRUNC_PW_RBF) {
-        for (j=0; j<g_sv_num; j++) {
-            res[j] = exp(g_param->gamma*(res[j]-1));
-        }
-    }
-
-    gettimeofday(&time_end, NULL);
-    clog_trace(CLOG(LOGGER_ID), "DFS nSVs=%d (%ld ms)", g_sv_num, diff_ms(time_end, time_start));
-
-    return res;
-}
-
-double gkmkernel_predict(const gkm_data *d)
-{
-    double result = 0;
-
-    if (g_sv_kmertreecoef == NULL) {
-        clog_error(CLOG(LOGGER_ID), "kmertreecoef has not been initialized. call gkmkernel_init_sv() first.\n");
-        return 0;
-    }
-
-    if (g_param_nthreads == 1) {
-        result = kmertreecoef_dfs_single(d);
-    } else if (g_param_nthreads == 4) {
-        result = kmertreecoef_dfs_par4(d);
-    } else if (g_param_nthreads == 16) {
-        result = kmertreecoef_dfs_par16(d);
-    }
-    else {
-        clog_warn(CLOG(LOGGER_ID), "Supported number of threads are 1, 4 and 16. nthread is set to 1");
-        g_param_nthreads = 1;
-        result = kmertreecoef_dfs_single(d);
-    }
-
-    return result/d->sqnorm;
 }
 
 void gkmkernel_set_num_threads(int n)
@@ -1661,361 +1290,3 @@ void gkmkernel_set_num_threads(int n)
         gkmkernel_kernelfunc_batch_ptr = gkmkernel_kernelfunc_batch_single;
     }
 }
-
-/*
- * variables and functions copied from libsvm.cpp to improve svm_load_model function
- *
- */
-static const char *svm_type_table[] =
-{
-    "c_svc","nu_svc","one_class","epsilon_svr","nu_svr",NULL
-};
-
-static const char *kernel_type_table[]=
-{
-    "gkm_cnt", "gkm_estfull", "gkm_esttrunc", "gkmrbf", "wgkm", "wgkmrbf", NULL
-};
-
-int svm_save_model(const char *model_file_name, const svm_model *model)
-{
-    FILE *fp = fopen(model_file_name,"w");
-    if(fp==NULL) return -1;
-
-    char *old_locale = strdup(setlocale(LC_ALL, NULL));
-    setlocale(LC_ALL, "C");
-
-    const svm_parameter& param = model->param;
-
-    fprintf(fp,"svm_type %s\n", svm_type_table[param.svm_type]);
-    fprintf(fp,"kernel_type %s\n", kernel_type_table[param.kernel_type]);
-    fprintf(fp,"L %d\n", param.L);
-    fprintf(fp,"k %d\n", param.k);
-    fprintf(fp,"d %d\n", param.d);
-
-    if ((param.kernel_type == EST_TRUNC_RBF) || (param.kernel_type == EST_TRUNC_PW_RBF)) {
-        fprintf(fp,"gamma %g\n", param.gamma);
-    }
-
-    if ((param.kernel_type == EST_TRUNC_PW) || (param.kernel_type == EST_TRUNC_PW_RBF)) {
-        fprintf(fp,"M %d\n", param.M);
-        fprintf(fp,"H %g\n", param.H);
-    }
-
-    int nr_class = model->nr_class;
-    int l = model->l;
-    fprintf(fp, "nr_class %d\n", nr_class);
-    fprintf(fp, "total_sv %d\n",l);
-
-    {
-        fprintf(fp, "rho");
-        for(int i=0;i<nr_class*(nr_class-1)/2;i++)
-            fprintf(fp," %g",model->rho[i]);
-        fprintf(fp, "\n");
-    }
-
-    if(model->label)
-    {
-        fprintf(fp, "label");
-        for(int i=0;i<nr_class;i++)
-            fprintf(fp," %d",model->label[i]);
-        fprintf(fp, "\n");
-    }
-
-    if(model->probA) // regression has probA only
-    {
-        fprintf(fp, "probA");
-        for(int i=0;i<nr_class*(nr_class-1)/2;i++)
-            fprintf(fp," %g",model->probA[i]);
-        fprintf(fp, "\n");
-    }
-    if(model->probB)
-    {
-        fprintf(fp, "probB");
-        for(int i=0;i<nr_class*(nr_class-1)/2;i++)
-            fprintf(fp," %g",model->probB[i]);
-        fprintf(fp, "\n");
-    }
-
-    if(model->nSV)
-    {
-        fprintf(fp, "nr_sv");
-        for(int i=0;i<nr_class;i++)
-            fprintf(fp," %d",model->nSV[i]);
-        fprintf(fp, "\n");
-    }
-
-    fprintf(fp, "SV\n");
-    const double * const *sv_coef = model->sv_coef;
-    const svm_data *SV = model->SV;
-
-    for(int i=0;i<l;i++)
-    {
-        for(int j=0;j<nr_class-1;j++)
-            fprintf(fp, "%.16g ",sv_coef[j][i]);
-
-        fprintf(fp, "%s\n", SV[i].d->seq_string);
-    }
-
-    setlocale(LC_ALL, old_locale);
-    free(old_locale);
-
-    if (ferror(fp) != 0 || fclose(fp) != 0) return -1;
-    else return 0;
-}
-
-static char *line = NULL;
-static int max_line_len;
-
-static char* readline(FILE *input)
-{
-    int len;
-
-    if(fgets(line,max_line_len,input) == NULL)
-        return NULL;
-
-    while(strrchr(line,'\n') == NULL)
-    {
-        max_line_len *= 2;
-        line = (char *) realloc(line,(size_t) max_line_len);
-        len = (int) strlen(line);
-        if(fgets(line+len,max_line_len-len,input) == NULL)
-            break;
-    }
-    return line;
-}
-
-//
-// FSCANF helps to handle fscanf failures.
-// Its do-while block avoids the ambiguity when
-// if (...)
-//    FSCANF();
-// is used
-//
-#define FSCANF(_stream, _format, _var) do{ if (fscanf(_stream, _format, _var) != 1) return false; }while(0)
-static bool read_model_header(FILE *fp, svm_model* model)
-{
-    svm_parameter& param = model->param;
-    char cmd[81];
-    while(1)
-    {
-        FSCANF(fp,"%80s",cmd);
-
-        if(strcmp(cmd,"svm_type")==0)
-        {
-            FSCANF(fp,"%80s",cmd);
-            int i;
-            for(i=0;svm_type_table[i];i++)
-            {
-                if(strcmp(svm_type_table[i],cmd)==0)
-                {
-                    param.svm_type=i;
-                    break;
-                }
-            }
-            if(svm_type_table[i] == NULL)
-            {
-                clog_error(CLOG(LOGGER_ID), "unknown svm type (%s)", cmd);
-                return false;
-            }
-        }
-        else if(strcmp(cmd,"kernel_type")==0)
-        {
-            FSCANF(fp,"%80s",cmd);
-            int i;
-            for(i=0;kernel_type_table[i];i++)
-            {
-                if(strcmp(kernel_type_table[i],cmd)==0)
-                {
-                    param.kernel_type=i;
-                    break;
-                }
-            }
-            if(kernel_type_table[i] == NULL)
-            {
-                clog_error(CLOG(LOGGER_ID), "unknown kernel function (%s).", cmd);
-                return false;
-            }
-        }
-        else if(strcmp(cmd,"L")==0)
-            FSCANF(fp,"%d",&param.L);
-        else if(strcmp(cmd,"k")==0)
-            FSCANF(fp,"%d",&param.k);
-        else if(strcmp(cmd,"d")==0)
-            FSCANF(fp,"%d",&param.d);
-        else if(strcmp(cmd,"gamma")==0)
-            FSCANF(fp,"%lf",&param.gamma);
-        else if(strcmp(cmd,"M")==0)
-        {
-            int tmpM;
-            FSCANF(fp,"%d",&tmpM);
-            param.M = (uint8_t) tmpM;
-        }
-        else if(strcmp(cmd,"H")==0)
-            FSCANF(fp,"%lf",&param.H);
-        else if(strcmp(cmd,"nr_class")==0)
-            FSCANF(fp,"%d",&model->nr_class);
-        else if(strcmp(cmd,"total_sv")==0)
-            FSCANF(fp,"%d",&model->l);
-        else if(strcmp(cmd,"rho")==0)
-        {
-            int n = model->nr_class * (model->nr_class-1)/2;
-            model->rho = Malloc(double,n);
-            for(int i=0;i<n;i++)
-                FSCANF(fp,"%lf",&model->rho[i]);
-        }
-        else if(strcmp(cmd,"label")==0)
-        {
-            int n = model->nr_class;
-            model->label = Malloc(int,n);
-            for(int i=0;i<n;i++)
-                FSCANF(fp,"%d",&model->label[i]);
-        }
-        else if(strcmp(cmd,"probA")==0)
-        {
-            int n = model->nr_class * (model->nr_class-1)/2;
-            model->probA = Malloc(double,n);
-            for(int i=0;i<n;i++)
-                FSCANF(fp,"%lf",&model->probA[i]);
-        }
-        else if(strcmp(cmd,"probB")==0)
-        {
-            int n = model->nr_class * (model->nr_class-1)/2;
-            model->probB = Malloc(double,n);
-            for(int i=0;i<n;i++)
-                FSCANF(fp,"%lf",&model->probB[i]);
-        }
-        else if(strcmp(cmd,"nr_sv")==0)
-        {
-            int n = model->nr_class;
-            model->nSV = Malloc(int,n);
-            for(int i=0;i<n;i++)
-                FSCANF(fp,"%d",&model->nSV[i]);
-        }
-        else if(strcmp(cmd,"SV")==0)
-        {
-            while(1)
-            {
-                int c = getc(fp);
-                if(c==EOF || c=='\n') break;
-            }
-            break;
-        }
-        else
-        {
-            clog_error(CLOG(LOGGER_ID), "unknown text in model file: [%s]",cmd);
-            return false;
-        }
-    }
-
-    return true;
-
-}
-
-// load a model with gkmtree initialization
-svm_model *svm_load_model(const char *model_file_name)
-{
-    FILE *fp = fopen(model_file_name,"rb");
-    if(fp==NULL) return NULL;
-
-    char *old_locale = strdup(setlocale(LC_ALL, NULL));
-    setlocale(LC_ALL, "C");
-
-    // read parameters
-    svm_model *model = Malloc(svm_model,1);
-    model->rho = NULL;
-    model->probA = NULL;
-    model->probB = NULL;
-    model->sv_indices = NULL;
-    model->label = NULL;
-    model->nSV = NULL;
-
-    // read header
-    if (!read_model_header(fp, model))
-    {
-        clog_error(CLOG(LOGGER_ID), "fscanf failed to read model");
-        setlocale(LC_ALL, old_locale);
-        free(old_locale);
-        free(model->rho);
-        free(model->label);
-        free(model->nSV);
-        free(model);
-        return NULL;
-    }
-
-    // initialization of gkmkernel after reading header
-    gkmkernel_init(&model->param);
-
-    // initialization of SV kmertree
-    gkmkernel_init_sv_kmertree_objects(model->nr_class);
-
-    // read sv_coef and SV
-    int elements = 0;
-    long pos = ftell(fp);
-
-    max_line_len = 1024;
-    line = Malloc(char,max_line_len);
-    char *p,*endptr,*val;
-
-    while(readline(fp)!=NULL)
-    {
-        p = strtok(line,":");
-        while(1)
-        {
-            p = strtok(NULL,":");
-            if(p == NULL)
-                break;
-            ++elements;
-        }
-    }
-    elements += model->l;
-
-    fseek(fp,pos,SEEK_SET);
-
-    int m = model->nr_class - 1;
-    int l = model->l;
-    model->sv_coef = Malloc(double *,m);
-    int i;
-    for(i=0;i<m;i++)
-        model->sv_coef[i] = Malloc(double,l);
-    model->SV = Malloc(svm_data,l);
-
-    for(i=0;i<l;i++)
-    {
-        if ((i > 0) && ((i % 1000) == 0)) {
-            clog_info(CLOG(LOGGER_ID), "reading... %d/%d", i, l);
-        }
-
-        readline(fp);
-        p = strtok(line, " \t");
-        model->sv_coef[0][i] = strtod(p,&endptr);
-        for(int k=1;k<m;k++)
-        {
-            p = strtok(NULL, " \t");
-            model->sv_coef[k][i] = strtod(p,&endptr);
-        }
-
-        val = strtok(NULL,"\n");
-        model->SV[i].d = gkmkernel_new_object(val, NULL, i);
-
-        // add SV to kmertree or kmertreecoef
-        gkmkernel_add_one_sv(model->SV[i].d, model->sv_coef[0][i], i, model->nr_class);
-
-        // free-up unnecessary data
-        gkmkernel_free_object(model->SV[i].d);
-    }
-
-    free(line);
-    setlocale(LC_ALL, old_locale);
-    free(old_locale);
-
-    if (ferror(fp) != 0 || fclose(fp) != 0)
-        return NULL;
-
-    model->free_sv = 1; // XXX
-
-    g_sv_svm_data = model->SV;
-    g_sv_num = model->l;
-
-    return model;
-}
-
