@@ -29,31 +29,9 @@
 #include "libgkm.h"
 #include "clog.h"
 
-#define MAX_MM 12
-
 //XXX: only works when MAX_ALPHABET_SIZE = 4
 #define LEAF_COUNT(a) (1<<(2*a))  
 #define NODE_COUNT(a) ((1<<(2*a))-1)/(MAX_ALPHABET_SIZE-1); // (x^n-1)/(x-1) = 1 + x + x^2 + ... x^(n-1)
-
-static gkm_parameter *g_param = NULL;
-static int g_param_nthreads = 1;
-
-//static double g_param_lambda = 1.0;
-
-/* g_weights are automatically determined based on the g_param->L, g_param->k, and g_param->d */
-static double g_weights[MAX_MM+1] = {0.0};
-
-static KmerTree *g_kmertree = NULL;
-
-static KmerTree *g_prob_kmertree = NULL;
-static gkm_data **g_prob_svm_data = NULL;
-static int g_prob_num = 0;
-static int *g_prob_gkmkernel_index = NULL;
-static int *g_prob_libsvm_index = NULL;
-
-static uint8_t *g_mmcnt_lookuptab = NULL;
-static int g_mmcnt_lookuptab_mask = 0;
-static int g_mmcnt_nlookups = 0;
 
 typedef struct _BaseMismatchCount {
     uint8_t *bid;
@@ -68,10 +46,12 @@ typedef struct _kmertree_dfs_pthread_t {
     BaseMismatchCount matching_bases[MAX_SEQ_LENGTH];
     int num_matching_bases;
     int **mmprofile;
+    double *weights;
     int last_seqid;
 } kmertree_dfs_pthread_t;
 
 typedef struct _kernelfunc_sqnorm_pthread_t {
+    gkm_kernel *kernel;
     int *twobitids;
     int *wt;
     int *mmprofile;
@@ -122,12 +102,12 @@ static double dCombinations(int n, int r)
     return res; 
 }
 
-static void calc_gkm_kernel_lmerest_wt(int truncated)
+static void calc_gkm_kernel_lmerest_wt(gkm_kernel *gkmkern, int truncated)
 {
     int b = MAX_ALPHABET_SIZE;
-    int L = g_param->L;
-    int K = g_param->k;
-    double *res = g_weights;
+    int L = gkmkern->param->L;
+    int K = gkmkern->param->k;
+    double *res = gkmkern->weights;
     double **wL = (double **) malloc(sizeof(double*) * ((size_t) (K+1))); 
     double **wLp =(double **) malloc(sizeof(double*) * ((size_t) (K+1)));
     double *wm = (double *) malloc(sizeof(double) * ((size_t) (K+1))); 
@@ -219,13 +199,13 @@ static void calc_gkm_kernel_lmerest_wt(int truncated)
     free(kernelTr);
 }
 
-static void calc_gkm_kernel_wt()
+static void calc_gkm_kernel_wt(gkm_kernel *gkmkern)
 {
     /* corresponding to h[m] */
     int i;
-    int L = g_param->L;
-    int K = g_param->k;
-    double *res = g_weights;
+    int L = gkmkern->param->L;
+    int K = gkmkern->param->k;
+    double *res = gkmkern->weights;
 
     for (i=0; i<=L; i++) {
         if ((L-i) >= K) {
@@ -238,13 +218,15 @@ static void calc_gkm_kernel_wt()
 /************************
  * kmertree functions *
  ************************/
-static void kmertree_init(KmerTree *tree, int kmerlen)
+static void kmertree_init(KmerTree *tree, int L, int k, int d)
 {
-    tree->depth = kmerlen;
-    tree->node_count = NODE_COUNT(kmerlen);
+    tree->L = L;
+    tree->k = k;
+    tree->d = d;
+    tree->node_count = NODE_COUNT(L);
     tree->node = (int *) calloc((size_t) tree->node_count, sizeof(int));
 
-    tree->leaf_count = LEAF_COUNT(kmerlen);
+    tree->leaf_count = LEAF_COUNT(L);
     tree->leaf = (KmerTreeLeaf *) calloc((size_t) tree->leaf_count, sizeof(KmerTreeLeaf));
 }
 
@@ -273,10 +255,10 @@ static void kmertree_add_sequence(const KmerTree *tree, int seqid, const gkm_dat
         uint8_t *seq = seqs[k];
         uint8_t *wt = wts[k];
 
-        for (j=0; j<(d->seqlen - tree->depth + 1); j++) {
+        for (j=0; j<(d->seqlen - tree->L + 1); j++) {
             int node_index = 0;
             int found = 0;
-            for (i=0; i<tree->depth; i++) {
+            for (i=0; i<tree->L; i++) {
                 tree->node[node_index]++;
                 node_index = (node_index*MAX_ALPHABET_SIZE) + seq[i+j];
             }
@@ -317,43 +299,14 @@ static void kmertree_add_sequence(const KmerTree *tree, int seqid, const gkm_dat
     }
 }
 
-/* not used
-static void kmertree_delete_sequence(const KmerTree *tree, int seqid, const gkm_data *d)
-{
-    int i, j, k;
-    uint8_t *seqs[2] = {d->seq, d->seq_rc};
-
-    for (k=0; k<2; k++) {
-        uint8_t *seq = seqs[k];
-        for (j=0; j<(d->seqlen - tree->depth + 1); j++) {
-            int node_index = 0;
-            for (i=0; i<tree->depth; i++) {
-                tree->node[node_index]++;
-                node_index = (node_index*MAX_ALPHABET_SIZE) + seq[i+j];
-            }
-
-            // set the wt zero from the corresponding leaf node 
-            // by scanning the stack
-            KmerTreeLeaf *leaf = tree->leaf + node_index - tree->node_count;
-
-            for (i=0; i<leaf->count; i++) {
-                if (leaf->data[i].seqid == seqid) {
-                    leaf->data[i].wt = 0; //reset
-                }
-            }
-        }
-    }
-}
-*/
-
 static void kmertree_dfs(const KmerTree *tree, const int last_seqid, const int depth, const int curr_node_index, const BaseMismatchCount *curr_matching_bases, const int curr_num_matching_bases, int **mmprof)
 {
     int i, j;
     int bid;
 
-    const int d = g_param->d; //for small speed-up
+    const int d = tree->d; //for small speed-up
 
-    if (depth == tree->depth - 1) {
+    if (depth == tree->L - 1) {
         KmerTreeLeaf *leaf = tree->leaf + (curr_node_index*MAX_ALPHABET_SIZE) - tree->node_count;
         for (bid=1; bid<=MAX_ALPHABET_SIZE; bid++) {
             leaf++;
@@ -424,7 +377,7 @@ static void kmertree_cleanup(const KmerTree *tree, int depth, int curr_node_inde
 {
     int bid;
 
-    if (depth == tree->depth - 1) {
+    if (depth == tree->L - 1) {
         for (bid=1; bid<=MAX_ALPHABET_SIZE; bid++) {
             KmerTreeLeaf *leaf = tree->leaf + (curr_node_index*MAX_ALPHABET_SIZE) + bid - tree->node_count;
             if (leaf->count > 0) {
@@ -444,27 +397,30 @@ static void kmertree_cleanup(const KmerTree *tree, int depth, int curr_node_inde
     tree->node[curr_node_index] = 0; //reset the reference count
 }
 
-static void kmertree_dfs_pthread_init_par4(const gkm_data *da, const int last_index, KmerTree *tree, kmertree_dfs_pthread_t *td)
+static void kmertree_dfs_pthread_init_par4(gkm_kernel *kernel, int a, const int last_index, kmertree_dfs_pthread_t *td)
 {
     int i, j, k;
+    const gkm_data *da = kernel->prob_svm_data[a];
+    const int d = kernel->param->d;
 
     //process the first level and initialize thread input & output variables
     for (i=0; i<MAX_ALPHABET_SIZE; i++) {
         //input
         int bid = i + 1;
-        td[i].tree = tree;
+        td[i].tree = kernel->prob_kmertree;
         td[i].start_depth = 1;
         td[i].start_node_index = bid;
         td[i].num_matching_bases = 0;
         td[i].last_seqid = last_index;
+        td[i].weights = kernel->weights;
 
         uint8_t *seq = da->seq;
         uint8_t *wt = da->wt;
-        for (j=0; j<da->seqlen - g_param->L + 1; j++) {
+        for (j=0; j<da->seqlen - kernel->param->L + 1; j++) {
             int mmcnt = 0;
             uint8_t *currbase_ptr = seq + j;
             if (*currbase_ptr != bid) mmcnt++;
-            if (mmcnt <= g_param->d) {
+            if (mmcnt <= d) {
                 td[i].matching_bases[td[i].num_matching_bases].bid = currbase_ptr + 1;
                 td[i].matching_bases[td[i].num_matching_bases].wt = wt[j];
                 td[i].matching_bases[td[i].num_matching_bases].mmcnt = mmcnt;
@@ -473,33 +429,35 @@ static void kmertree_dfs_pthread_init_par4(const gkm_data *da, const int last_in
         }
 
         //output
-        td[i].mmprofile = (int **) malloc(sizeof(int*) * ((size_t) (g_param->d+1)));
-        for (k=0; k<=g_param->d; k++) {
+        td[i].mmprofile = (int **) malloc(sizeof(int*) * ((size_t) (d+1)));
+        for (k=0; k<=d; k++) {
             td[i].mmprofile[k] = (int *) malloc(sizeof(int) * ((size_t) last_index));
             for(j=0; j<last_index; j++) { td[i].mmprofile[k][j] = 0; }
         }
     }
 }
 
-static void kmertree_dfs_pthread_init_par16(const gkm_data *da, const int last_index, KmerTree *tree, kmertree_dfs_pthread_t *td)
+static void kmertree_dfs_pthread_init_par16(gkm_kernel *kernel, int a, const int last_index, kmertree_dfs_pthread_t *td)
 {
     int i, j, k;
-    const int d = g_param->d;
+    const gkm_data *da = kernel->prob_svm_data[a];
+    const int d = kernel->prob_kmertree->d;
 
     //process the first TWO level and initialize thread input & output variables
     for (i=0; i<MAX_ALPHABET_SIZE * MAX_ALPHABET_SIZE; i++) {
         //input
         int bid1 = (i>>2) + 1;
         int bid2 = (i%4) + 1;
-        td[i].tree = tree;
+        td[i].tree = kernel->prob_kmertree;
         td[i].start_depth = 2;
         td[i].start_node_index = MAX_ALPHABET_SIZE + i + 1;
         td[i].num_matching_bases = 0;
         td[i].last_seqid = last_index;
+        td[i].weights = kernel->weights;
 
         uint8_t *seq = da->seq;
         uint8_t *wt = da->wt;
-        for (j=0; j<da->seqlen - g_param->L + 1; j++) {
+        for (j=0; j<da->seqlen - kernel->param->L + 1; j++) {
             int mmcnt = 0;
             uint8_t *base_ptr1 = seq + j;
             uint8_t *base_ptr2 = base_ptr1 + 1;
@@ -536,7 +494,7 @@ static void kmertree_dfs_pthread_process(kmertree_dfs_pthread_t *td, const int n
     int i, j, k;
     pthread_t threads[MAX_ALPHABET_SIZE_SQ];
     int rc[MAX_ALPHABET_SIZE_SQ];
-    const int d = g_param->d;
+    const int d = td[0].tree->d;
 
     //run threads. i=0 will be executed later in the main process
     for (i=1; i<nthreads; i++) {
@@ -563,7 +521,7 @@ static void kmertree_dfs_pthread_process(kmertree_dfs_pthread_t *td, const int n
 
         for (j=start; j<end; j++) {
             for (k=0; k<=d; k++) {
-                res[j-start] += (g_weights[k] * td[i].mmprofile[k][j]);
+                res[j-start] += (td[i].weights[k] * td[i].mmprofile[k][j]);
             }
         }
 
@@ -573,18 +531,18 @@ static void kmertree_dfs_pthread_process(kmertree_dfs_pthread_t *td, const int n
         }
         free(td[i].mmprofile);
     }
-
 }
 
 /***************************************
  * gkmkernel internal kernel functions *
  ***************************************/
-static void gkmkernel_kernelfunc_batch_single(const gkm_data *da, KmerTree *tree, const int start, const int end, double *res) 
+static void gkmkernel_kernelfunc_batch_single(gkm_kernel *kernel, int a, const int start, const int end, double *res) 
 {
     int i, j, k;
     BaseMismatchCount matching_bases[MAX_SEQ_LENGTH];
-    int num_matching_bases = da->seqlen - g_param->L + 1;
-    const int d = g_param->d;
+    const gkm_data *da = kernel->prob_svm_data[a];
+    int num_matching_bases = da->seqlen - kernel->param->L + 1;
+    const int d = kernel->param->d;
 
     for (i=0; i<num_matching_bases; i++) {
         matching_bases[i].bid = da->seq + i;
@@ -599,12 +557,12 @@ static void gkmkernel_kernelfunc_batch_single(const gkm_data *da, KmerTree *tree
         for(j=0; j<end; j++) { mmprofile[k][j] = 0; }
     }
 
-    kmertree_dfs(tree, end, 0, 0, matching_bases, num_matching_bases, mmprofile);
+    kmertree_dfs(kernel->prob_kmertree, end, 0, 0, matching_bases, num_matching_bases, mmprofile);
 
     for (j=start; j<end; j++) {
         double sum = 0;
         for (k=0; k<=d; k++) {
-            sum += (g_weights[k]*mmprofile[k][j]);
+            sum += (kernel->weights[k]*mmprofile[k][j]);
         }
         res[j-start] = sum;
     }
@@ -616,20 +574,20 @@ static void gkmkernel_kernelfunc_batch_single(const gkm_data *da, KmerTree *tree
     free(mmprofile);
 }
 
-static void gkmkernel_kernelfunc_batch_par4(const gkm_data *da, KmerTree *tree, const int start, const int end, double *res)
+static void gkmkernel_kernelfunc_batch_par4(gkm_kernel *kernel, int a, const int start, const int end, double *res) 
 {
     kmertree_dfs_pthread_t td[MAX_ALPHABET_SIZE];
 
-    kmertree_dfs_pthread_init_par4(da, end, tree, td);
+    kmertree_dfs_pthread_init_par4(kernel, a, end, td);
 
     kmertree_dfs_pthread_process(td, MAX_ALPHABET_SIZE, start, end, res);
 }
 
-static void gkmkernel_kernelfunc_batch_par16(const gkm_data *da, KmerTree *tree, int start, int end, double *res)
+static void gkmkernel_kernelfunc_batch_par16(gkm_kernel *kernel, int a, const int start, const int end, double *res) 
 {
     kmertree_dfs_pthread_t td[MAX_ALPHABET_SIZE_SQ];
 
-    kmertree_dfs_pthread_init_par16(da, end, tree, td);
+    kmertree_dfs_pthread_init_par16(kernel, a, end, td);
 
     kmertree_dfs_pthread_process(td, MAX_ALPHABET_SIZE_SQ, start, end, res);
 }
@@ -638,70 +596,57 @@ static void gkmkernel_kernelfunc_batch_par16(const gkm_data *da, KmerTree *tree,
 // gkmkernel_kernelfunc_batch_single
 // gkmkernel_kernelfunc_batch_par4
 // gkmkernel_kernelfunc_batch_par16
-static void (*gkmkernel_kernelfunc_batch_ptr)(const gkm_data *da, KmerTree *tree, int start, int end, double *res) = gkmkernel_kernelfunc_batch_single;
-
-static double gkmkernel_kernelfunc_raw(const gkm_data *da, const gkm_data *db)
-{
-    double res = 0;
-
-    kmertree_add_sequence(g_kmertree, 0, db);
-
-    gkmkernel_kernelfunc_batch_ptr(da, g_kmertree, 0, 1, &res);
-
-    kmertree_cleanup(g_kmertree, 0, 0);
-
-    return res;
-}
+static void (*gkmkernel_kernelfunc_batch_ptr)(gkm_kernel *kernel, int a, int start, int end, double *res) = gkmkernel_kernelfunc_batch_single;
 
 // 2/17/2016
 // functions for efficient calulation of sqrt(K(a, a)) using XOR lookup table
 // This was also implemented in the original gkm-SVM software
 // current implementation only supports L<=MMCNT_LOOKUPTAB_WIDTH*2
-static void gkmkernel_build_mmcnt_lookuptable()
+static void gkmkernel_build_mmcnt_lookuptable(gkm_kernel *kernel)
 {
     int i, j;
     int mask = 3;
     unsigned int tablesize = (1<<(MMCNT_LOOKUPTAB_WIDTH*2));
 
-    g_mmcnt_lookuptab = (uint8_t *) malloc(sizeof(uint8_t) * tablesize);
+    kernel->mmcnt_lookuptab = (uint8_t *) malloc(sizeof(uint8_t) * tablesize);
 
     for (i=0; i<tablesize; i++) {
         int xor_word = i;
-        g_mmcnt_lookuptab[i] = 0;
+        kernel->mmcnt_lookuptab[i] = 0;
         for (j=0; j<MMCNT_LOOKUPTAB_WIDTH; j++) {
             if ((xor_word & mask) != 0) {
-                g_mmcnt_lookuptab[i]++;
+                kernel->mmcnt_lookuptab[i]++;
             }
             xor_word >>= 2;
         }
-        //clog_trace(CLOG(LOGGER_ID), "g_lookup_table: %d %d", i, g_mmcnt_lookuptab[i]);
+        //clog_trace(CLOG(LOGGER_ID), "kernel->lookup_table: %d %d", i, kernel->mmcnt_lookuptab[i]);
     }
 
-    g_mmcnt_lookuptab_mask = 0;
+    kernel->mmcnt_lookuptab_mask = 0;
     for (i=0; i<MMCNT_LOOKUPTAB_WIDTH; i++) {
-        g_mmcnt_lookuptab_mask = ((g_mmcnt_lookuptab_mask << 2) | 3);
+        kernel->mmcnt_lookuptab_mask = ((kernel->mmcnt_lookuptab_mask << 2) | 3);
     }
    
-    if (g_param->L <= MMCNT_LOOKUPTAB_WIDTH) {
-        g_mmcnt_nlookups = 1;
-    } else if (g_param->L <= MMCNT_LOOKUPTAB_WIDTH*2) {
-        g_mmcnt_nlookups = 2;
+    if (kernel->param->L <= MMCNT_LOOKUPTAB_WIDTH) {
+        kernel->mmcnt_nlookups = 1;
+    } else if (kernel->param->L <= MMCNT_LOOKUPTAB_WIDTH*2) {
+        kernel->mmcnt_nlookups = 2;
     } else {
-        clog_error(CLOG(LOGGER_ID), "L(%d) cannot be greater than MMCNT_LOOKUPTAB_WIDTH*2 (%d).", g_param->L, MMCNT_LOOKUPTAB_WIDTH*2);
+        clog_error(CLOG(LOGGER_ID), "L(%d) cannot be greater than MMCNT_LOOKUPTAB_WIDTH*2 (%d).", kernel->param->L, MMCNT_LOOKUPTAB_WIDTH*2);
     }
 
-    clog_trace(CLOG(LOGGER_ID), "g_mmcnt_lookuptab_mask: %x", g_mmcnt_lookuptab_mask);
-    clog_trace(CLOG(LOGGER_ID), "g_mmcnt_nlookups: %d", g_mmcnt_nlookups);
+    clog_trace(CLOG(LOGGER_ID), "kernel->mmcnt_lookuptab_mask: %x", kernel->mmcnt_lookuptab_mask);
+    clog_trace(CLOG(LOGGER_ID), "kernel->mmcnt_nlookups: %d", kernel->mmcnt_nlookups);
 }
 
-static int sequence2twobitids(const gkm_data *d, int *twobitids)
+static int sequence2twobitids(gkm_kernel *kernel, const gkm_data *d, int *twobitids)
 {
     int i, j;
     uint8_t *seqs[2] = {d->seq, d->seq_rc};
-    int nids = (d->seqlen - g_param->L + 1) * 2;
+    int nids = (d->seqlen - kernel->param->L + 1) * 2;
 
     int mask=3;
-    for (i=0; i<g_param->L-1; i++) {
+    for (i=0; i<kernel->param->L-1; i++) {
         mask = ((mask<<2) | 3);
     }
 
@@ -709,19 +654,19 @@ static int sequence2twobitids(const gkm_data *d, int *twobitids)
     for (j=0; j<2; j++) { 
         int twobitid=0;
         uint8_t *s = seqs[j];
-        for (i=0; i<g_param->L-1; i++) {
+        for (i=0; i<kernel->param->L-1; i++) {
             twobitid = ((twobitid<<2) | (s[i]-1));
             //clog_trace(CLOG(LOGGER_ID), "seq2twobitid: %d %d %x", i, s[i]-1, twobitid);
         }
 
-        for (i=g_param->L-1; i<d->seqlen; i++) {
+        for (i=kernel->param->L-1; i<d->seqlen; i++) {
             twobitid = (((twobitid<<2) & mask) | (s[i]-1));
 
-            twobitids[cnt] = (twobitid & g_mmcnt_lookuptab_mask);
+            twobitids[cnt] = (twobitid & kernel->mmcnt_lookuptab_mask);
 
             //each id is divided into two pieces if L is greater than MMCNT_LOOKUPTAB_WIDTH
-            if (g_mmcnt_nlookups == 2) {
-                twobitids[nids + cnt] = ((twobitid >> (2*MMCNT_LOOKUPTAB_WIDTH)) & g_mmcnt_lookuptab_mask);
+            if (kernel->mmcnt_nlookups == 2) {
+                twobitids[nids + cnt] = ((twobitid >> (2*MMCNT_LOOKUPTAB_WIDTH)) & kernel->mmcnt_lookuptab_mask);
             }
 
             cnt++;
@@ -740,7 +685,7 @@ static void *kernelfunc_sqnorm_pthread(void *ptr)
     const int *twobitids = td->twobitids;
     const int *wt = td->wt;
     const int nids = td->nids;
-    const int d = g_param->d;
+    const int d = td->kernel->param->d;
     int *mmprofile = td->mmprofile;
 
     for (i=td->start_idx; i<td->end_idx; i++) {
@@ -748,9 +693,9 @@ static void *kernelfunc_sqnorm_pthread(void *ptr)
         const int id1 = twobitids[nids + i];
         const int wt_i = wt[i];
         for (j=0; j<nids; j++) {
-            int mmcnt = g_mmcnt_lookuptab[id0 ^ twobitids[j]];
-            if ((mmcnt <= d) && (g_mmcnt_nlookups == 2)) {
-                mmcnt += g_mmcnt_lookuptab[id1 ^ twobitids[nids + j]];
+            int mmcnt = td->kernel->mmcnt_lookuptab[id0 ^ twobitids[j]];
+            if ((mmcnt <= d) && (td->kernel->mmcnt_nlookups == 2)) {
+                mmcnt += td->kernel->mmcnt_lookuptab[id1 ^ twobitids[nids + j]];
             }
             if (mmcnt <= d) {
                 mmprofile[mmcnt]+=(wt_i*wt[j]);
@@ -761,14 +706,14 @@ static void *kernelfunc_sqnorm_pthread(void *ptr)
     return 0;
 }
 
-static double gkmkernel_kernelfunc_sqnorm_single(const gkm_data *da)
+static double gkmkernel_kernelfunc_sqnorm_single(gkm_kernel *kernel, const gkm_data *da)
 {
     int i, j, k;
     int twobitids[MAX_SEQ_LENGTH*2*2];
     int wt[MAX_SEQ_LENGTH*2];
-    int nids = sequence2twobitids(da, twobitids);
-    int nkmerids= (da->seqlen - g_param->L + 1);
-    int d = g_param->d;
+    int nids = sequence2twobitids(kernel, da, twobitids);
+    int nkmerids= (da->seqlen - kernel->param->L + 1);
+    int d = kernel->param->d;
 
     int mmprofile[MAX_MM];
 
@@ -781,9 +726,9 @@ static double gkmkernel_kernelfunc_sqnorm_single(const gkm_data *da)
         const int id1 = twobitids[nids + i];
         const int wt_i = wt[i];
         for (j=0; j<nids; j++) {
-            int mmcnt = g_mmcnt_lookuptab[id0 ^ twobitids[j]];
-            if ((mmcnt <= d) && (g_mmcnt_nlookups == 2)) {
-                mmcnt += g_mmcnt_lookuptab[id1 ^ twobitids[nids + j]];
+            int mmcnt = kernel->mmcnt_lookuptab[id0 ^ twobitids[j]];
+            if ((mmcnt <= d) && (kernel->mmcnt_nlookups == 2)) {
+                mmcnt += kernel->mmcnt_lookuptab[id1 ^ twobitids[nids + j]];
             }
             if (mmcnt <= d) {
                 mmprofile[mmcnt]+=(wt_i*wt[j]);
@@ -793,46 +738,47 @@ static double gkmkernel_kernelfunc_sqnorm_single(const gkm_data *da)
 
     double sum = 0;
     for (k=0; k<=d; k++) {
-        sum += (g_weights[k]*mmprofile[k]);
+        sum += (kernel->weights[k]*mmprofile[k]);
     }
 
     return sqrt(sum);
 }
 
-static double gkmkernel_kernelfunc_sqnorm_multi(const gkm_data *da)
+static double gkmkernel_kernelfunc_sqnorm_multi(gkm_kernel *kernel, const gkm_data *da)
 {
     int i, k;
     int twobitids[MAX_SEQ_LENGTH*2*2];
     int wt[MAX_SEQ_LENGTH*2];
-    int nids = sequence2twobitids(da, twobitids);
-    int nkmerids= (da->seqlen - g_param->L + 1);
-    int d = g_param->d;
+    int nids = sequence2twobitids(kernel, da, twobitids);
+    int nkmerids= (da->seqlen - kernel->param->L + 1);
+    int d = kernel->param->d;
 
     kernelfunc_sqnorm_pthread_t td[MAX_ALPHABET_SIZE_SQ];
     pthread_t threads[MAX_ALPHABET_SIZE_SQ];
     int rc[MAX_ALPHABET_SIZE_SQ];
     int mmprofile[MAX_ALPHABET_SIZE_SQ][MAX_MM];
 
-    for (i=0; i<g_param_nthreads; i++) {
+    for (i=0; i<kernel->param->nthreads; i++) {
         for (k=0; k<=d; k++) { mmprofile[i][k] = 0; }
     }
     for (i=0; i<nkmerids; i++) { wt[i] = da->wt[i]; }
     for (i=0; i<nkmerids; i++) { wt[nkmerids + i] = da->wt_rc[i]; }
 
     int prev_end_idx = 0;
-    for (i=0; i<g_param_nthreads; i++) {
+    for (i=0; i<kernel->param->nthreads; i++) {
+        td[i].kernel = kernel;
         td[i].twobitids = twobitids;
         td[i].wt = wt;
         td[i].mmprofile = mmprofile[i];
         td[i].nids = nids;
         td[i].start_idx = prev_end_idx;
-        td[i].end_idx = int(nkmerids*(i+1)/g_param_nthreads) + 1;
+        td[i].end_idx = int(nkmerids*(i+1)/kernel->param->nthreads) + 1;
         prev_end_idx = td[i].end_idx;
     }
-    td[g_param_nthreads-1].end_idx = nkmerids; // last idx in the last thread should always be this.
+    td[kernel->param->nthreads-1].end_idx = nkmerids; // last idx in the last thread should always be this.
 
     //run threads. i=0 will be executed later in the main process
-    for (i=1; i<g_param_nthreads; i++) {
+    for (i=1; i<kernel->param->nthreads; i++) {
         rc[i] = pthread_create(&threads[i], NULL, kernelfunc_sqnorm_pthread, (void *) &td[i]);
         if (rc[i]) {
             clog_error(CLOG(LOGGER_ID), "failed to create thread %d. pthread_create() returned %d", i, rc[i]);
@@ -842,7 +788,7 @@ static double gkmkernel_kernelfunc_sqnorm_multi(const gkm_data *da)
     }
 
     //collect results
-    for (i=0; i<g_param_nthreads; i++) {
+    for (i=0; i<kernel->param->nthreads; i++) {
         if (i == 0) {
             kernelfunc_sqnorm_pthread((void *) &td[i]);
         } else {
@@ -858,19 +804,19 @@ static double gkmkernel_kernelfunc_sqnorm_multi(const gkm_data *da)
 
     double sum = 0;
     for (k=0; k<=d; k++) {
-        for (i=1; i<g_param_nthreads; i++) { mmprofile[0][k] += mmprofile[i][k]; }
-        sum += (g_weights[k]*mmprofile[0][k]);
+        for (i=1; i<kernel->param->nthreads; i++) { mmprofile[0][k] += mmprofile[i][k]; }
+        sum += (kernel->weights[k]*mmprofile[0][k]);
     }
 
     return sqrt(sum);
 }
 
-static double gkmkernel_kernelfunc_sqnorm(const gkm_data *da)
+static double gkmkernel_kernelfunc_sqnorm(gkm_kernel *kernel, const gkm_data *da)
 {
-    if (g_param_nthreads == 1) {
-        return gkmkernel_kernelfunc_sqnorm_single(da);
+    if (kernel->param->nthreads == 1) {
+        return gkmkernel_kernelfunc_sqnorm_single(kernel, da);
     } else {
-        return gkmkernel_kernelfunc_sqnorm_multi(da);
+        return gkmkernel_kernelfunc_sqnorm_multi(kernel, da);
     }
 }
 
@@ -878,7 +824,7 @@ static double gkmkernel_kernelfunc_sqnorm(const gkm_data *da)
  * global gkmkernel functions *
  ******************************/
 /* build a new gkm_data structure */
-gkm_data* gkmkernel_new_object(char *seq, char *sid, int seqid)
+gkm_data* gkmkernel_new_object(gkm_kernel *kernel, char *seq, char *sid, int seqid)
 {
     gkm_data *d;
     int i, j, k;
@@ -928,33 +874,34 @@ gkm_data* gkmkernel_new_object(char *seq, char *sid, int seqid)
     }
 
     /* convert sequence/sequence_rc to a set of k-mer ids */
-    int nkmerids= (d->seqlen - g_param->L + 1);
+    int nkmerids= (d->seqlen - kernel->param->L + 1);
     uint8_t *seqs[2] = {d->seq, d->seq_rc};
     d->kmerids = (int *) malloc(sizeof(int) * ((size_t) nkmerids));
     d->kmerids_rc = (int *) malloc(sizeof(int) * ((size_t) nkmerids));
 
     int *kmerids[2] = {d->kmerids, d->kmerids_rc};
-    int total_node_count = NODE_COUNT(g_param->L);
+    int total_node_count = NODE_COUNT(kernel->param->L);
     for (k=0; k<2; k++) {
         uint8_t *seq = seqs[k];
         int *kmerid = kmerids[k];
         for (j=0; j<nkmerids; j++) {
             int node_index = 0;
-            for (i=0; i<g_param->L; i++) {
+            for (i=0; i<kernel->param->L; i++) {
                 node_index = (node_index*MAX_ALPHABET_SIZE) + seq[i+j];
             }
             kmerid[j] = node_index - total_node_count;
         }
     }
 
-    d->wt = (uint8_t *) malloc(sizeof(uint8_t) * ((size_t) (d->seqlen - g_param->L + 1)));
-    d->wt_rc = (uint8_t *) malloc(sizeof(uint8_t) * ((size_t) (d->seqlen - g_param->L + 1)));
+    d->wt = (uint8_t *) malloc(sizeof(uint8_t) * ((size_t) (d->seqlen - kernel->param->L + 1)));
+    d->wt_rc = (uint8_t *) malloc(sizeof(uint8_t) * ((size_t) (d->seqlen - kernel->param->L + 1)));
     int center = nkmerids/2;
 
-    if (g_param->kernel_type == EST_TRUNC_PW || g_param->kernel_type == EST_TRUNC_PW_RBF) {
+    if (kernel->param->kernel_type == EST_TRUNC_PW || 
+            kernel->param->kernel_type == EST_TRUNC_PW_RBF) {
         /* exponential decay weights */
-        double H = g_param->H;
-        uint8_t M = g_param->M;
+        double H = kernel->param->H;
+        uint8_t M = kernel->param->M;
 
         for (i=0; i<nkmerids; i++) { 
             uint8_t wt = (uint8_t) floor(M*exp((-1)*log(2)*abs(center-i)/H) + 1);
@@ -970,37 +917,7 @@ gkm_data* gkmkernel_new_object(char *seq, char *sid, int seqid)
         }
     }
     
-    /* gaussian weights */
-    /*
-    double bw = 150;
-    double gamma = log(0.5)/(bw*bw);
-    double scale = 4;
-
-    for (i=0; i<nkmerids; i++) { 
-        uint8_t wt = (uint8_t) floor(scale*exp(gamma*(center-i)*(center-i)+0.02) + 1);
-        d->wt[i] = wt;
-        d->wt_rc[nkmerids-i-1] = wt;
-    }
-    */
-
-    /* linear weights */
-    /*
-    double binsize = 50.0;
-    for (i=0; i<nkmerids; i++) { 
-        uint8_t wt = (uint8_t) floor((center - abs(center - i))/binsize + 1); 
-        d->wt[i] = wt;
-        d->wt_rc[nkmerids-i-1] = wt;
-    }
-    */
-
-    /* calculate square root of the kernel(d,d) and store for normalization */
-    /*
-    double kern = gkmkernel_kernelfunc_raw(d, d);
-	clog_trace(CLOG(LOGGER_ID), "%d's kernel is %f", seqid, kern);
-    d->sqnorm = sqrt(kern);
-    */
-
-    d->sqnorm = gkmkernel_kernelfunc_sqnorm(d);
+    d->sqnorm = gkmkernel_kernelfunc_sqnorm(kernel, d);
 	clog_trace(CLOG(LOGGER_ID), "%d's sqnorm is %f", seqid, d->sqnorm);
 
     return(d);
@@ -1044,11 +961,15 @@ void gkmkernel_free_object(gkm_data* d)
 }
 
 /* set the extra parameters for gkmkernel */
-void gkmkernel_init(gkm_parameter *param)
+gkm_kernel *gkmkernel_init(gkm_parameter *param)
 {
     int i;
+    gkm_kernel *kernel;
 
-    g_param = param;
+    gkmkernel_set_num_threads(param);
+
+    kernel = (gkm_kernel *) malloc(sizeof(gkm_kernel));
+    kernel->param = param;
 
     /* calculate the corresponding weights for calculating kernels from mismatch profiles
      *
@@ -1059,147 +980,125 @@ void gkmkernel_init(gkm_parameter *param)
      * 4: truncated filter + rbf
      * 5: truncated filter + positional weights + rbf
      */
-    switch(g_param->kernel_type) {
+    switch(param->kernel_type) {
         case GKM:
-            calc_gkm_kernel_wt();
+            calc_gkm_kernel_wt(kernel);
             break;
         case EST_FULL:
-            calc_gkm_kernel_lmerest_wt(0);
+            calc_gkm_kernel_lmerest_wt(kernel, 0);
             break;
         case EST_TRUNC:
-            calc_gkm_kernel_lmerest_wt(1);
+            calc_gkm_kernel_lmerest_wt(kernel, 1);
             break;
         case EST_TRUNC_PW:
-            calc_gkm_kernel_lmerest_wt(1);
+            calc_gkm_kernel_lmerest_wt(kernel, 1);
             break;
         case EST_TRUNC_RBF:
-            calc_gkm_kernel_lmerest_wt(1);
+            calc_gkm_kernel_lmerest_wt(kernel, 1);
             break;
         case EST_TRUNC_PW_RBF:
-            calc_gkm_kernel_lmerest_wt(1);
+            calc_gkm_kernel_lmerest_wt(kernel, 1);
             break;
         default:
-            calc_gkm_kernel_lmerest_wt(1);
+            calc_gkm_kernel_lmerest_wt(kernel, 1);
             break;
     }
 
     clog_debug(CLOG(LOGGER_ID), "gkm-kernel weights:");
 
-    for (i=0; i<=g_param->d; i++) {
-        clog_debug(CLOG(LOGGER_ID), "  c[%d] = %.6f", i, g_weights[i]);     
+    for (i=0; i<=param->d; i++) {
+        clog_debug(CLOG(LOGGER_ID), "  c[%d] = %.6f", i, kernel->weights[i]);     
     }
 
-    g_kmertree = (KmerTree *) malloc(sizeof(KmerTree));
-    kmertree_init(g_kmertree, g_param->L);
+    kernel->kmertree = (KmerTree *) malloc(sizeof(KmerTree));
+    kmertree_init(kernel->kmertree, kernel->param->L, kernel->param->k, kernel->param->d);
 
-    gkmkernel_build_mmcnt_lookuptable();
+    gkmkernel_build_mmcnt_lookuptable(kernel);
+
+    return kernel;
 }
 
-void gkmkernel_init_problems(gkm_data **x, int n)
+void gkmkernel_build_tree(gkm_kernel *kernel, gkm_data **x, int n)
 {
     int i;
 
-    /* initialize g_prob_kmertree */
-    g_prob_kmertree = (KmerTree *) malloc(sizeof(KmerTree));
-    kmertree_init(g_prob_kmertree, g_param->L);
+    /* initialize prob_kmertree */
+    kernel->prob_kmertree = (KmerTree *) malloc(sizeof(KmerTree));
+    kmertree_init(kernel->prob_kmertree, kernel->param->L, kernel->param->k, kernel->param->d);
 
-    g_prob_svm_data = (gkm_data **) malloc(sizeof(gkm_data *) * ((size_t) n));
-    memcpy((void *)g_prob_svm_data, (void *)x, sizeof(gkm_data *) * ((size_t) n));
-    g_prob_num = n;
+    kernel->prob_svm_data = (gkm_data **) malloc(sizeof(gkm_data *) * ((size_t) n));
+    memcpy((void *)kernel->prob_svm_data, (void *)x, sizeof(gkm_data *) * ((size_t) n));
+    kernel->prob_num = n;
 
-    g_prob_gkmkernel_index = (int *) malloc(sizeof(int) * ((size_t) n));
-    g_prob_libsvm_index = (int *) malloc(sizeof(int) * ((size_t) n));
+    kernel->prob_gkmkernel_index = (int *) malloc(sizeof(int) * ((size_t) n));
+    kernel->prob_libsvm_index = (int *) malloc(sizeof(int) * ((size_t) n));
 
     //add sequences
     for (i=0; i<n; i++) {
-        g_prob_gkmkernel_index[i] = i;
-        g_prob_libsvm_index[i] = i;
-        kmertree_add_sequence(g_prob_kmertree, i, x[i]);
+        kernel->prob_gkmkernel_index[i] = i;
+        kernel->prob_libsvm_index[i] = i;
+        kmertree_add_sequence(kernel->prob_kmertree, i, x[i]);
     }
 }
 
-void gkmkernel_destroy_problems()
+void gkmkernel_destroy(gkm_kernel *kernel)
 {
-    kmertree_destroy(g_prob_kmertree);
+    if (kernel->prob_svm_data) { free(kernel->prob_svm_data); }
+    if (kernel->prob_gkmkernel_index) { free(kernel->prob_gkmkernel_index); }
+    if (kernel->prob_libsvm_index) { free(kernel->prob_libsvm_index); }
 
-    if (g_prob_svm_data) { free(g_prob_svm_data); }
-    if (g_prob_gkmkernel_index) { free(g_prob_gkmkernel_index); }
-    if (g_prob_libsvm_index) { free(g_prob_libsvm_index); }
+    kmertree_destroy(kernel->prob_kmertree);
+    kmertree_destroy(kernel->kmertree);
 
-    g_prob_kmertree = NULL;
-    g_prob_svm_data = NULL;
-    g_prob_gkmkernel_index = NULL;
-    g_prob_libsvm_index = NULL;
-    g_prob_num = 0;
-}
-
-void gkmkernel_destroy()
-{
-    gkmkernel_destroy_problems();
-
-    kmertree_destroy(g_kmertree);
-
-    g_kmertree = NULL;
+    free(kernel);
 }
 
 
-void gkmkernel_swap_index(int i, int j)
+void gkmkernel_swap_index(gkm_kernel *kernel, int i, int j)
 {
     int tmp;
 
-    tmp                                            = g_prob_libsvm_index[g_prob_gkmkernel_index[i]];
-    g_prob_libsvm_index[g_prob_gkmkernel_index[i]] = g_prob_libsvm_index[g_prob_gkmkernel_index[j]];
-    g_prob_libsvm_index[g_prob_gkmkernel_index[j]] = tmp;
+    tmp                                                        = kernel->prob_libsvm_index[kernel->prob_gkmkernel_index[i]];
+    kernel->prob_libsvm_index[kernel->prob_gkmkernel_index[i]] = kernel->prob_libsvm_index[kernel->prob_gkmkernel_index[j]];
+    kernel->prob_libsvm_index[kernel->prob_gkmkernel_index[j]] = tmp;
 
-    tmp                       = g_prob_gkmkernel_index[i];
-    g_prob_gkmkernel_index[i] = g_prob_gkmkernel_index[j];
-    g_prob_gkmkernel_index[j] = tmp;
+    tmp                       = kernel->prob_gkmkernel_index[i];
+    kernel->prob_gkmkernel_index[i] = kernel->prob_gkmkernel_index[j];
+    kernel->prob_gkmkernel_index[j] = tmp;
 }
 
-void gkmkernel_update_index()
+void gkmkernel_update_index(gkm_kernel *kernel)
 {
     int i, j;
-    for (i=0; i<g_prob_kmertree->leaf_count; i++) {
-        KmerTreeLeaf *leaf = g_prob_kmertree->leaf + i;
+    for (i=0; i<kernel->prob_kmertree->leaf_count; i++) {
+        KmerTreeLeaf *leaf = kernel->prob_kmertree->leaf + i;
         KmerTreeLeafData *data = leaf->data;
         for (j=0; j<leaf->count; j++) {
             int old_id = data[j].seqid;
-            data[j].seqid = g_prob_libsvm_index[old_id];
+            data[j].seqid = kernel->prob_libsvm_index[old_id];
         }
     }
 
-    gkm_data **svm_data_new = (gkm_data **) malloc(sizeof(gkm_data *) * ((size_t) g_prob_num));
-    for (i=0; i<g_prob_num; i++) {
-        svm_data_new[i] = g_prob_svm_data[g_prob_gkmkernel_index[i]];
+    gkm_data **svm_data_new = (gkm_data **) malloc(sizeof(gkm_data *) * ((size_t) kernel->prob_num));
+    for (i=0; i< kernel->prob_num; i++) {
+        svm_data_new[i] = kernel->prob_svm_data[kernel->prob_gkmkernel_index[i]];
     }
 
-    free(g_prob_svm_data);
-    g_prob_svm_data = svm_data_new;
+    free(kernel->prob_svm_data);
+    kernel->prob_svm_data = svm_data_new;
 
     //reset
-    for (i=0; i<g_prob_num; i++) {
-        g_prob_gkmkernel_index[i] = i;
-        g_prob_libsvm_index[i] = i;
+    for (i=0; i<kernel->prob_num; i++) {
+        kernel->prob_gkmkernel_index[i] = i;
+        kernel->prob_libsvm_index[i] = i;
     }
 }
-
-
 
 /********************
  * kernel functions *
  ********************/
-/* single kernel */
-double gkmkernel_kernelfunc(const gkm_data *da, const gkm_data *db)
-{
-    if (da == db) {
-        return 1.0;
-    } else {
-        return gkmkernel_kernelfunc_raw(da, db)/(da->sqnorm*db->sqnorm);
-    }
-}
-
 /* calculate multiple kernels when n is relatively small */
-double* gkmkernel_kernelfunc_batch(const gkm_data *da, const gkm_data **db_array, const int n, double *res) 
+double* gkmkernel_kernelfunc_batch(gkm_kernel *kernel, int a, const gkm_data **db_array, const int n, double *res)
 {
     int i, j;
     struct timeval time_start, time_end;
@@ -1207,7 +1106,7 @@ double* gkmkernel_kernelfunc_batch(const gkm_data *da, const gkm_data **db_array
     //add sequences to the tree
     gettimeofday(&time_start, NULL);
     for (i=0; i<n; i++) {
-        kmertree_add_sequence(g_kmertree, i, db_array[i]);
+        kmertree_add_sequence(kernel->kmertree, i, db_array[i]);
     }
     gettimeofday(&time_end, NULL);
     clog_debug(CLOG(LOGGER_ID), "add sequences to kmertree (%ld ms)", diff_ms(time_end, time_start));
@@ -1216,34 +1115,33 @@ double* gkmkernel_kernelfunc_batch(const gkm_data *da, const gkm_data **db_array
     //initialize result variable
     for (j=0; j<n; j++) { res[j] = 0; }
 
-    gkmkernel_kernelfunc_batch_ptr(da, g_kmertree, 0, n, res);
+    gkmkernel_kernelfunc_batch_ptr(kernel, a, 0, n, res);
 
     //normalization
-    double da_sqnorm = da->sqnorm;
+    double da_sqnorm = kernel->prob_svm_data[a]->sqnorm;
     for (i=0; i<n; i++) {
         res[i] /= (da_sqnorm*db_array[i]->sqnorm);
     }
 
     //RBF kernel
-    if (g_param->kernel_type == EST_TRUNC_RBF || g_param->kernel_type == EST_TRUNC_PW_RBF) {
+    if (kernel->param->kernel_type == EST_TRUNC_RBF || kernel->param->kernel_type == EST_TRUNC_PW_RBF) {
         for (i=0; i<n; i++) {
-            res[i] = exp(g_param->gamma*(res[i]-1));
+            res[i] = exp(kernel->param->gamma*(res[i]-1));
         }
     }
 
     gettimeofday(&time_end, NULL);
     clog_trace(CLOG(LOGGER_ID), "DFS n=%d (%ld ms)", n, diff_ms(time_end, time_start));
 
-    kmertree_cleanup(g_kmertree, 0, 0);
+    kmertree_cleanup(kernel->kmertree, 0, 0);
 
     return res;
 }
 
 /* calculate multiple kernels using precomputed kmertree with all samples */
-double* gkmkernel_kernelfunc_batch_all(const int a, const int start, const int end, double *res) 
+double* gkmkernel_kernelfunc_batch_all(gkm_kernel *kernel, const int a, const int start, const int end, double *res) 
 {
     int j;
-    const gkm_data *da = g_prob_svm_data[a];
     struct timeval time_start, time_end;
 
     gettimeofday(&time_start, NULL);
@@ -1251,18 +1149,18 @@ double* gkmkernel_kernelfunc_batch_all(const int a, const int start, const int e
     //initialize result variable
     for (j=0; j<end-start; j++) { res[j] = 0; }
 
-    gkmkernel_kernelfunc_batch_ptr(da, g_prob_kmertree, start, end, res);
+    gkmkernel_kernelfunc_batch_ptr(kernel, a, start, end, res);
 
     //normalization
-    double da_sqnorm = da->sqnorm;
+    double da_sqnorm = kernel->prob_svm_data[a]->sqnorm;
     for (j=start; j<end; j++) {
-        res[j-start] /= (da_sqnorm*g_prob_svm_data[j]->sqnorm);
+        res[j-start] /= (da_sqnorm * kernel->prob_svm_data[j]->sqnorm);
     }
 
     //RBF kernel
-    if (g_param->kernel_type == EST_TRUNC_RBF || g_param->kernel_type == EST_TRUNC_PW_RBF) {
+    if (kernel->param->kernel_type == EST_TRUNC_RBF || kernel->param->kernel_type == EST_TRUNC_PW_RBF) {
         for (j=0; j<end-start; j++) {
-            res[j] = exp(g_param->gamma*(res[j]-1));
+            res[j] = exp(kernel->param->gamma*(res[j]-1));
         }
     }
 
@@ -1272,21 +1170,148 @@ double* gkmkernel_kernelfunc_batch_all(const int a, const int start, const int e
     return res;
 }
 
-void gkmkernel_set_num_threads(int n)
+void gkmkernel_set_num_threads(gkm_parameter *param)
 {
-    g_param_nthreads = n;
+    int n = param->nthreads;
 
     clog_info(CLOG(LOGGER_ID), "Number of threads is set to %d", n);
 
-    if (g_param_nthreads == 1) {
+    if (n == 1) {
         gkmkernel_kernelfunc_batch_ptr = gkmkernel_kernelfunc_batch_single;
-    } else if (g_param_nthreads == 4) {
+    } else if (n == 4) {
         gkmkernel_kernelfunc_batch_ptr = gkmkernel_kernelfunc_batch_par4;
-    } else if (g_param_nthreads == 16) {
+    } else if (n == 16) {
         gkmkernel_kernelfunc_batch_ptr = gkmkernel_kernelfunc_batch_par16;
     } else {
         clog_warn(CLOG(LOGGER_ID), "Supported number of threads are 1, 4 and 16. nthread is set to 1");
-        g_param_nthreads = 1;
+        param->nthreads = 1;
         gkmkernel_kernelfunc_batch_ptr = gkmkernel_kernelfunc_batch_single;
     }
 }
+
+static char* readline(FILE *input, char *line, int *max_line_len)
+{
+    if(fgets(line,*max_line_len,input) == NULL)
+        return NULL;
+
+    while(strrchr(line,'\n') == NULL)
+    {
+        (*max_line_len) *= 2;
+        line = (char *) realloc(line, (size_t) (*max_line_len));
+        int len = (int) strlen(line);
+        if(fgets(line+len,(*max_line_len)-len,input) == NULL)
+            break;
+    }
+    
+    //remove CR ('\r') or LF ('\n'), whichever comes first
+    line[strcspn(line, "\r\n")] = '\0';
+
+    return line;
+}
+
+static int count_sequences(const char *filename)
+{
+    FILE *fp = fopen(filename,"r");
+    int nseqs = 0;
+    int max_line_len = 1024;
+    char *line = (char *) malloc(sizeof(char) * ((size_t) max_line_len));
+
+    if(fp == NULL) {
+        clog_error(CLOG(LOGGER_ID), "can't open file");
+        exit(1);
+    }
+
+    //count the number of sequences for memory allocation
+    while (readline(fp, line, &max_line_len)!=NULL) {
+        if (line[0] == '>') {
+            ++nseqs;
+        }
+    }
+    free(line);
+    fclose(fp);
+    
+    return nseqs;
+}
+
+static void read_fasta_file(gkm_kernel *kernel, svm_problem *prob, const char *filename, int offset, int label)
+{
+    int max_line_len = 1024;
+    char *line = (char *) malloc(sizeof(char) * ((size_t) max_line_len));
+
+    FILE *fp = fopen(filename, "r");
+
+    if(fp == NULL) {
+        clog_error(CLOG(LOGGER_ID), "can't open file");
+        exit(1);
+    }
+
+    int iseq = -1;
+    char seq[MAX_SEQ_LENGTH];
+    char sid[MAX_SEQ_LENGTH];
+    int seqlen = 0;
+    sid[0] = '\0';
+    while (readline(fp, line, &max_line_len)) {
+        if (iseq >= prob->l) {
+            clog_error(CLOG(LOGGER_ID), "error occured while reading sequence file (%d >= %d).\n", iseq, prob->l);
+            exit(1);
+        }
+
+        if (line[0] == '>') {
+            if (((iseq % 1000) == 0)) {
+                clog_info(CLOG(LOGGER_ID), "reading... %d", iseq);
+            }
+
+            if (iseq >= 0) {
+                prob->y[offset + iseq] = label;
+                prob->x[offset + iseq] = gkmkernel_new_object(kernel, seq, sid, offset + iseq);
+            }
+            ++iseq;
+
+            seq[0] = '\0'; //reset sequence
+            seqlen = 0;
+            char *ptr = strtok(line," \t\r\n");
+            if (strlen(ptr) >= MAX_SEQ_LENGTH) {
+                clog_error(CLOG(LOGGER_ID), "maximum sequence id length is %d.\n", MAX_SEQ_LENGTH-1);
+                exit(1);
+            }
+            strcpy(sid, ptr+1);
+        } else {
+            if (seqlen < MAX_SEQ_LENGTH-1) {
+                if ((((size_t) seqlen) + strlen(line)) >= MAX_SEQ_LENGTH) {
+                    clog_warn(CLOG(LOGGER_ID), "maximum sequence length allowed is %d. The first %d nucleotides of %s will only be used (Note: You can increase the MAX_SEQ_LENGTH parameter in libsvm_gkm.h and recompile).", MAX_SEQ_LENGTH-1, MAX_SEQ_LENGTH-1, sid);
+                    int remaining_len = MAX_SEQ_LENGTH - seqlen - 1;
+                    line[remaining_len] = '\0';
+                }
+                strcat(seq, line);
+                seqlen += (int) strlen(line);
+            }
+        }
+    }
+
+    //last one
+    prob->y[offset + iseq] = label;
+    prob->x[offset + iseq] = gkmkernel_new_object(kernel, seq, sid, offset + iseq);
+
+    clog_info(CLOG(LOGGER_ID), "reading... done");
+
+    free(line);
+    fclose(fp);
+}
+
+void gkmkernel_read_problems(gkm_kernel *kernel, svm_problem *prob, const char *posfile, const char *negfile)
+{
+    int n1 = count_sequences(posfile);
+    int n2 = count_sequences(negfile);
+
+    prob->l = n1+n2;
+
+    prob->y = (double *) malloc (sizeof(double) * ((size_t) prob->l));
+    prob->x = (gkm_data **) malloc(sizeof(gkm_data *) * ((size_t) prob->l));
+
+    clog_info(CLOG(LOGGER_ID), "reading %d sequences from %s", n1, posfile);
+    read_fasta_file(kernel, prob, posfile, 0, 1);
+
+    clog_info(CLOG(LOGGER_ID), "reading %d sequences from %s", n2, negfile);
+    read_fasta_file(kernel, prob, negfile, n1, -1);
+}
+
