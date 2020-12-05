@@ -3,137 +3,19 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
+#include <pthread.h>
 
 #include "libgkm.h"
 
 #define CLOG_MAIN
 #include "clog.h"
 
-static char* readline(FILE *input, char *line, int *max_line_len)
-{
-    if(fgets(line,*max_line_len,input) == NULL)
-        return NULL;
-
-    while(strrchr(line,'\n') == NULL)
-    {
-        (*max_line_len) *= 2;
-        line = (char *) realloc(line, (size_t) (*max_line_len));
-        int len = (int) strlen(line);
-        if(fgets(line+len,(*max_line_len)-len,input) == NULL)
-            break;
-    }
-    
-    //remove CR ('\r') or LF ('\n'), whichever comes first
-    line[strcspn(line, "\r\n")] = '\0';
-
-    return line;
-}
-
-int count_sequences(const char *filename)
-{
-    FILE *fp = fopen(filename,"r");
-    int nseqs = 0;
-    int max_line_len = 1024;
-    char *line = (char *) malloc(sizeof(char) * ((size_t) max_line_len));
-
-    if(fp == NULL) {
-        clog_error(CLOG(LOGGER_ID), "can't open file");
-        exit(1);
-    }
-
-    //count the number of sequences for memory allocation
-    while (readline(fp, line, &max_line_len)!=NULL) {
-        if (line[0] == '>') {
-            ++nseqs;
-        }
-    }
-    free(line);
-    fclose(fp);
-    
-    return nseqs;
-}
-
-void read_fasta_file(svm_problem *prob, const char *filename, int offset, int label)
-{
-    int max_line_len = 1024;
-    char *line = (char *) malloc(sizeof(char) * ((size_t) max_line_len));
-
-    FILE *fp = fopen(filename, "r");
-
-    if(fp == NULL) {
-        clog_error(CLOG(LOGGER_ID), "can't open file");
-        exit(1);
-    }
-
-    int iseq = -1;
-    char seq[MAX_SEQ_LENGTH];
-    char sid[MAX_SEQ_LENGTH];
-    int seqlen = 0;
-    sid[0] = '\0';
-    while (readline(fp, line, &max_line_len)) {
-        if (iseq >= prob->l) {
-            clog_error(CLOG(LOGGER_ID), "error occured while reading sequence file (%d >= %d).\n", iseq, prob->l);
-            exit(1);
-        }
-
-        if (line[0] == '>') {
-            if (((iseq % 1000) == 0)) {
-                clog_info(CLOG(LOGGER_ID), "reading... %d", iseq);
-            }
-
-            if (iseq >= 0) {
-                prob->y[offset + iseq] = label;
-                prob->x[offset + iseq] = gkmkernel_new_object(seq, sid, offset + iseq);
-            }
-            ++iseq;
-
-            seq[0] = '\0'; //reset sequence
-            seqlen = 0;
-            char *ptr = strtok(line," \t\r\n");
-            if (strlen(ptr) >= MAX_SEQ_LENGTH) {
-                clog_error(CLOG(LOGGER_ID), "maximum sequence id length is %d.\n", MAX_SEQ_LENGTH-1);
-                exit(1);
-            }
-            strcpy(sid, ptr+1);
-        } else {
-            if (seqlen < MAX_SEQ_LENGTH-1) {
-                if ((((size_t) seqlen) + strlen(line)) >= MAX_SEQ_LENGTH) {
-                    clog_warn(CLOG(LOGGER_ID), "maximum sequence length allowed is %d. The first %d nucleotides of %s will only be used (Note: You can increase the MAX_SEQ_LENGTH parameter in libsvm_gkm.h and recompile).", MAX_SEQ_LENGTH-1, MAX_SEQ_LENGTH-1, sid);
-                    int remaining_len = MAX_SEQ_LENGTH - seqlen - 1;
-                    line[remaining_len] = '\0';
-                }
-                strcat(seq, line);
-                seqlen += (int) strlen(line);
-            }
-        }
-    }
-
-    //last one
-    prob->y[offset + iseq] = label;
-    prob->x[offset + iseq] = gkmkernel_new_object(seq, sid, offset + iseq);
-
-    clog_info(CLOG(LOGGER_ID), "reading... done");
-
-    free(line);
-    fclose(fp);
-}
-
-void read_problem(svm_problem *prob, const char *posfile, const char *negfile)
-{
-    int n1 = count_sequences(posfile);
-    int n2 = count_sequences(negfile);
-
-    prob->l = n1+n2;
-
-    prob->y = (double *) malloc (sizeof(double) * ((size_t) prob->l));
-    prob->x = (gkm_data **) malloc(sizeof(gkm_data *) * ((size_t) prob->l));
-
-    clog_info(CLOG(LOGGER_ID), "reading %d sequences from %s", n1, posfile);
-    read_fasta_file(prob, posfile, 0, 1);
-
-    clog_info(CLOG(LOGGER_ID), "reading %d sequences from %s", n2, negfile);
-    read_fasta_file(prob, negfile, n1, -1);
-}
+typedef struct _gkmkernel_pthread_data_t {
+    gkm_kernel *kernel;
+    int nthreads;
+    int task_ind;
+    double **res;
+} gkmkernel_pthread_data_t;
 
 const char *gkm_check_parameter(const gkm_parameter *param)
 {
@@ -172,7 +54,7 @@ typedef struct _gkmOpt {
     int L;
     int k;
     int d;
-    uint8_t M;
+    u_int8_t M;
     double H;
     double gamma;
     char *posfile;
@@ -181,9 +63,26 @@ typedef struct _gkmOpt {
     int verbosity;
 } gkmOpt;
 
+static void *pthread_gkmkernel_kernelfunc_batch_all(void *ptr)
+{
+    int i;
+    gkmkernel_pthread_data_t *td = (gkmkernel_pthread_data_t *) ptr;
+    int NTHREADS = td->nthreads;
+
+    for (i = 0; i < td->kernel->prob_num/NTHREADS; i++) {
+        int a = (i*NTHREADS) + td->task_ind;
+        gkmkernel_kernelfunc_batch_all(td->kernel, a, 0, a, td->res[i]); 
+        if (i % 10 == 0) {
+            clog_info(CLOG(LOGGER_ID), "  Thread %d, i = %d", td->task_ind, i);
+        }
+    }
+
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
-    int i, j;
+    int i, j, k;
     gkm_parameter param;
     svm_problem prob;
     gkmOpt _opts, *opts;
@@ -231,6 +130,7 @@ int main(int argc, char** argv)
     param.M = opts->M;
     param.H = opts->H;
     param.gamma = opts->gamma;
+    param.nthreads = 1; // no longer used...
 
     switch(opts->verbosity) 
     {
@@ -272,19 +172,59 @@ int main(int argc, char** argv)
     clog_info(CLOG(LOGGER_ID), "  H = %g", param.H);
     }
 
-    gkmkernel_set_num_threads(opts->nthreads);
-
-    // build-up kernel and check integrity of options
-    gkmkernel_init(&param);
-    read_problem(&prob, opts->posfile, opts->negfile);
     const char *error_msg = gkm_check_parameter(&param);
-
     if(error_msg) {
         clog_error(CLOG(LOGGER_ID), error_msg);
         return 1; // error exit 
     }
 
-    gkmkernel_init_problems(prob.x, prob.l); //build kmertree using the entire problem set, which will then be used by gkmkernel_kernelfunc_batch_all
+    // build-up kernel and check integrity of options
+    gkm_kernel *kernel = gkmkernel_init(&param);
+    gkmkernel_read_problems(kernel, &prob, opts->posfile, opts->negfile);
+    gkmkernel_build_tree(kernel, prob.x, prob.l); //build kmertree using the entire problem set, which will then be used by gkmkernel_kernelfunc_batch_all
+
+    // multithreads by line
+    int NTHREADS = opts->nthreads;
+    gkmkernel_pthread_data_t *td;
+    pthread_t *threads;
+
+    td = (gkmkernel_pthread_data_t *) malloc(sizeof(gkmkernel_pthread_data_t) * ((size_t) NTHREADS));
+    threads= (pthread_t *) malloc(sizeof(pthread_t) * ((size_t) NTHREADS));
+    
+    // initialize data for threads
+    for (i=0; i<NTHREADS; i++) {
+        td[i].kernel = kernel;
+        td[i].task_ind = i;
+        td[i].nthreads = NTHREADS;
+        td[i].res = (double **) malloc(sizeof(double *) * ((size_t) prob.l/(unsigned int)NTHREADS));
+        for(j = 0; j < prob.l/NTHREADS; j++) {
+            td[i].res[j] = (double *) malloc(sizeof(double) * 10000);
+        }
+    }
+
+    int rc[NTHREADS];
+    for (i=1; i<NTHREADS; i++) {
+        rc[i] = pthread_create(&threads[i], NULL, pthread_gkmkernel_kernelfunc_batch_all, (void *) &td[i]);
+        if (rc[i]) {
+            clog_error(CLOG(LOGGER_ID), "failed to create thread. pthread_create() returned %d", rc[i]);
+        } else {
+            clog_trace(CLOG(LOGGER_ID), "thread %d was created.", i);
+        }
+    }
+
+    for (i=0; i<NTHREADS; i++) {
+        if (i == 0) {
+            pthread_gkmkernel_kernelfunc_batch_all(&td[i]);
+        } else {
+            if (rc[i] == 0) {
+                //wait thread return
+                pthread_join(threads[i], NULL);
+            } else {
+                //if failed to run thread, execute the function in the main process
+                pthread_gkmkernel_kernelfunc_batch_all(&td[i]);
+            }
+        }
+    }
 
     FILE *fo = fopen(outfile, "w");
     if (fo == NULL) {
@@ -292,23 +232,23 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    double res[10000];
-    for(i = 0; i < prob.l; i++) {
-        gkmkernel_kernelfunc_batch_all(i, 0, prob.l, res);
-        if (i % 10 == 0) {
-            clog_info(CLOG(LOGGER_ID), "  i = %d", i);
+    for(i = 0; i < prob.l/NTHREADS; i++) {
+        for(j = 0; j < NTHREADS; j++) {
+            for(k = 0; k < (i*NTHREADS) + j; k++) {
+				fprintf(fo, "%e\t", td[j].res[i][k]);
+            }
+            fprintf(fo, "1.0\t\n");
         }
-		for(j = 0; j < prob.l; j++) {
-			if(j < i) {
-				fprintf(fo, "%e\t", res[j]);
-			}
-			else if (i == j) {
-				fprintf(fo, "1.0\t");
-			}
-		}
-		fprintf(fo, "\n");
     }
-	fclose(fo);
+
+    // free memory
+    for(j = 0; j < NTHREADS; j++) {
+        for(i = 0; i < prob.l/NTHREADS; i++) {
+            free(td[j].res[i]);
+        }
+        free(td[j].res);
+    }
+    free(td);
 
     // remove allocated memory
     for (i = 0; i < prob.l; i++) {
@@ -316,6 +256,8 @@ int main(int argc, char** argv)
     }
     free(prob.y);
     free(prob.x);
+
+    gkmkernel_destroy(kernel);
 
     return 0;
 }
