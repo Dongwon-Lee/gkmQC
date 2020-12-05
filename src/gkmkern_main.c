@@ -3,11 +3,19 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
+#include <pthread.h>
 
 #include "libgkm.h"
 
 #define CLOG_MAIN
 #include "clog.h"
+
+typedef struct _gkmkernel_pthread_data_t {
+    gkm_kernel *kernel;
+    int nthreads;
+    int task_ind;
+    double **res;
+} gkmkernel_pthread_data_t;
 
 const char *gkm_check_parameter(const gkm_parameter *param)
 {
@@ -55,9 +63,26 @@ typedef struct _gkmOpt {
     int verbosity;
 } gkmOpt;
 
+static void *pthread_gkmkernel_kernelfunc_batch_all(void *ptr)
+{
+    int i;
+    gkmkernel_pthread_data_t *td = (gkmkernel_pthread_data_t *) ptr;
+    int NTHREADS = td->nthreads;
+
+    for (i = 0; i < td->kernel->prob_num/NTHREADS; i++) {
+        int a = (i*NTHREADS) + td->task_ind;
+        gkmkernel_kernelfunc_batch_all(td->kernel, a, 0, a, td->res[i]); 
+        if (i % 10 == 0) {
+            clog_info(CLOG(LOGGER_ID), "  Thread %d, i = %d", td->task_ind, i);
+        }
+    }
+
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
-    int i, j;
+    int i, j, k;
     gkm_parameter param;
     svm_problem prob;
     gkmOpt _opts, *opts;
@@ -105,7 +130,7 @@ int main(int argc, char** argv)
     param.M = opts->M;
     param.H = opts->H;
     param.gamma = opts->gamma;
-    param.nthreads = opts->nthreads;
+    param.nthreads = 1; // no longer used...
 
     switch(opts->verbosity) 
     {
@@ -158,29 +183,72 @@ int main(int argc, char** argv)
     gkmkernel_read_problems(kernel, &prob, opts->posfile, opts->negfile);
     gkmkernel_build_tree(kernel, prob.x, prob.l); //build kmertree using the entire problem set, which will then be used by gkmkernel_kernelfunc_batch_all
 
+    // multithreads by line
+    int NTHREADS = opts->nthreads;
+    gkmkernel_pthread_data_t *td;
+    pthread_t *threads;
+
+    td = (gkmkernel_pthread_data_t *) malloc(sizeof(gkmkernel_pthread_data_t) * ((size_t) NTHREADS));
+    threads= (pthread_t *) malloc(sizeof(pthread_t) * ((size_t) NTHREADS));
+    
+    // initialize data for threads
+    for (i=0; i<NTHREADS; i++) {
+        td[i].kernel = kernel;
+        td[i].task_ind = i;
+        td[i].nthreads = NTHREADS;
+        td[i].res = (double **) malloc(sizeof(double *) * ((size_t) prob.l/(unsigned int)NTHREADS));
+        for(j = 0; j < prob.l/NTHREADS; j++) {
+            td[i].res[j] = (double *) malloc(sizeof(double) * 10000);
+        }
+    }
+
+    int rc[NTHREADS];
+    for (i=1; i<NTHREADS; i++) {
+        rc[i] = pthread_create(&threads[i], NULL, pthread_gkmkernel_kernelfunc_batch_all, (void *) &td[i]);
+        if (rc[i]) {
+            clog_error(CLOG(LOGGER_ID), "failed to create thread. pthread_create() returned %d", rc[i]);
+        } else {
+            clog_trace(CLOG(LOGGER_ID), "thread %d was created.", i);
+        }
+    }
+
+    for (i=0; i<NTHREADS; i++) {
+        if (i == 0) {
+            pthread_gkmkernel_kernelfunc_batch_all(&td[i]);
+        } else {
+            if (rc[i] == 0) {
+                //wait thread return
+                pthread_join(threads[i], NULL);
+            } else {
+                //if failed to run thread, execute the function in the main process
+                pthread_gkmkernel_kernelfunc_batch_all(&td[i]);
+            }
+        }
+    }
+
     FILE *fo = fopen(outfile, "w");
     if (fo == NULL) {
         perror ("error occurred while opening a file");
         return 1;
     }
 
-    double res[10000];
-    for(i = 0; i < prob.l; i++) {
-        gkmkernel_kernelfunc_batch_all(kernel, i, 0, prob.l, res);
-        if (i % 10 == 0) {
-            clog_info(CLOG(LOGGER_ID), "  i = %d", i);
+    for(i = 0; i < prob.l/NTHREADS; i++) {
+        for(j = 0; j < NTHREADS; j++) {
+            for(k = 0; k < (i*NTHREADS) + j; k++) {
+				fprintf(fo, "%e\t", td[j].res[i][k]);
+            }
+            fprintf(fo, "1.0\t\n");
         }
-		for(j = 0; j <= i; j++) {
-			if(j < i) {
-				fprintf(fo, "%e\t", res[j]);
-			}
-			else if (i == j) {
-				fprintf(fo, "1.0\t");
-			}
-		}
-		fprintf(fo, "\n");
     }
-	fclose(fo);
+
+    // free memory
+    for(j = 0; j < NTHREADS; j++) {
+        for(i = 0; i < prob.l/NTHREADS; i++) {
+            free(td[j].res[i]);
+        }
+        free(td[j].res);
+    }
+    free(td);
 
     // remove allocated memory
     for (i = 0; i < prob.l; i++) {

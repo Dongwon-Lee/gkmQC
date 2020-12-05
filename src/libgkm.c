@@ -33,6 +33,8 @@
 #define LEAF_COUNT(a) (1<<(2*a))  
 #define NODE_COUNT(a) ((1<<(2*a))-1)/(MAX_ALPHABET_SIZE-1); // (x^n-1)/(x-1) = 1 + x + x^2 + ... x^(n-1)
 
+#define MAX_NUM 999999
+
 typedef struct _BaseMismatchCount {
     uint8_t *bid;
     uint8_t wt;
@@ -220,11 +222,19 @@ static void calc_gkm_kernel_wt(gkm_kernel *gkmkern)
  ************************/
 static void kmertree_init(KmerTree *tree, int L, int k, int d)
 {
+    int i;
     tree->L = L;
     tree->k = k;
     tree->d = d;
     tree->node_count = NODE_COUNT(L);
     tree->node = (int *) calloc((size_t) tree->node_count, sizeof(int));
+
+    // Initialize node with MAX_NUM
+    // Instead of storing count in node variable, I will store MIN seqid stored in the daughter nodes [0, n).
+    // This will allow us to truncate the DFS search if we don't have to searach for all sequences
+    for (i = 0; i < tree->node_count; i++) {
+        tree->node[i] = MAX_NUM;
+    }
 
     tree->leaf_count = LEAF_COUNT(L);
     tree->leaf = (KmerTreeLeaf *) calloc((size_t) tree->leaf_count, sizeof(KmerTreeLeaf));
@@ -259,7 +269,10 @@ static void kmertree_add_sequence(const KmerTree *tree, int seqid, const gkm_dat
             int node_index = 0;
             int found = 0;
             for (i=0; i<tree->L; i++) {
-                tree->node[node_index]++;
+                if (tree->node[node_index] > seqid) {
+                    tree->node[node_index] = seqid;
+                }
+                //tree->node[node_index]++;
                 node_index = (node_index*MAX_ALPHABET_SIZE) + seq[i+j];
             }
 
@@ -343,7 +356,7 @@ static void kmertree_dfs(const KmerTree *tree, const int last_seqid, const int d
         int daughter_node_index = (curr_node_index*MAX_ALPHABET_SIZE);
         for (bid=1; bid<=MAX_ALPHABET_SIZE; bid++) {
             daughter_node_index++;
-            if (tree->node[daughter_node_index] > 0) {
+            if (tree->node[daughter_node_index] < last_seqid) {
                 BaseMismatchCount next_matching_bases[MAX_SEQ_LENGTH];
                 int next_num_matching_bases = 0;
 
@@ -394,7 +407,8 @@ static void kmertree_cleanup(const KmerTree *tree, int depth, int curr_node_inde
         }
     }
 
-    tree->node[curr_node_index] = 0; //reset the reference count
+    tree->node[curr_node_index] = MAX_NUM; //reset the minimum seqid
+    //tree->node[curr_node_index] = 0; //reset the reference count
 }
 
 static void kmertree_dfs_pthread_init_par4(gkm_kernel *kernel, int a, const int last_index, kmertree_dfs_pthread_t *td)
@@ -1174,7 +1188,8 @@ void gkmkernel_set_num_threads(gkm_parameter *param)
 {
     int n = param->nthreads;
 
-    clog_info(CLOG(LOGGER_ID), "Number of threads is set to %d", n);
+    // number of threads for tree traverse is always 1
+    // clog_info(CLOG(LOGGER_ID), "Number of threads is set to %d", n);
 
     if (n == 1) {
         gkmkernel_kernelfunc_batch_ptr = gkmkernel_kernelfunc_batch_single;
