@@ -25,6 +25,7 @@ import zipfile, tarfile
 import random
 
 from bitarray import bitarray
+import numpy as np
 from multiprocessing import Process, Queue
 
 base_data_dir = os.path.abspath('%s/../data' % os.path.dirname(__file__))
@@ -182,13 +183,16 @@ def read_bed_file(fn):
         print("I/O error: ", err)
         sys.exit(0)
     
-    positions = []
+    posi_dic = {}
     for line in lines:
         if line[0] == '#':
             continue
         l = line.split()
-        positions.append((l[0], int(l[1]), int(l[2])))
-    return positions
+        if not l[0] in posi_dic:
+            posi_dic[l[0]] = []
+        posi_dic[l[0]].append(int(l[1]))
+
+    return posi_dic.items()
 
 ##
 # load .bit files (bit array - gc, rp, na)
@@ -207,7 +211,7 @@ def bitarray_fromfile(fn):
 # per-chromosome retrive of null-seq location
 # rewrote from Dongwon's code (nullseq_generate.py)
 ##
-def _per_chrom_sample_nullseq_idx(position_l, genome, chrom, t, fold):
+def _per_chrom_sample_nullseq_idx(pos_posi_l, genome, chrom, t, fold):
     
     # load bit array
     idxf_gc = os.path.join(base_data_dir, genome, '.'.join([chrom, 'gc', 'bit']))
@@ -226,32 +230,22 @@ def _per_chrom_sample_nullseq_idx(position_l, genome, chrom, t, fold):
         print("I/O error: ", err)
         sys.exit(0)
 
-    sampled_posi_l = [[] for _ in range(len(position_l))]
-    for i, positions in enumerate(position_l): # per peak subsets
-
+    sampled_posi_l = [[] for _ in range(len(pos_posi_l))]
+    for i, pos_posi in enumerate(pos_posi_l): # per peak subsets
         # make profile (pos, neg)
-        #profiles_ = []
         sampled_posi = sampled_posi_l[i]
-        for pos in positions:
-            if pos[0] != chrom:
-                continue
-            #seqid = pos[0] + ':' + str(pos[1]+1) + '-' + str(pos[2]) // legacy code: seqid
-            gc = gc_arr[pos[1]:pos[2]].count(True)
-            rp = rp_arr[pos[1]:pos[2]].count(True)
+
+        for pos in pos_posi:
+            gc = gc_arr[pos:pos + t].count(True)
+            rp = rp_arr[pos:pos + t].count(True)
 
             # random sampling of null seq with same gc/rp
             k = 0
             while k < fold:
                 i = random.sample(idx_li[gc][rp], 1)[0]
-                if not i in sampled_posi and i != pos[1]:
+                if not i in sampled_posi and i != pos:
                     sampled_posi.append(i)
                     k += 1
-
-        # this bit array is used to mark positions that are excluded from sampling
-        # this will be updated as we sample more sequences in order to prevent sampled sequences from overlapping
-        #idxf_na = os.path.join(base_data_dir, '.'.join([genome, chrom, 'na', 'bit']))
-        #na_arr, naf = bitarray_fromfile(idxf_na)
-        #naf.close()
 
     return (chrom, sampled_posi_l)
 
@@ -280,40 +274,112 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
     # args_fcts_null_bed
     # read positions of positive peaks
     
-    position_l = []
+    pos_posi_l = []
     for pos_bed_file in pos_bed_files:
-        position_l.append(read_bed_file(pos_bed_file))
+        pos_posi_l.append(read_bed_file(pos_bed_file))
 
     # chromosomes
-    chrnames = sorted(set(map(lambda p: p[0], position_l[0])))
+    chrnames = sorted(pos_posi_l[0].keys())
 
     q_tasks = Queue()
-    q_results = Queue() # dummy queue
+    q_results = Queue()
+
+    positive_l = [] # by chr
     for chrom in chrnames:
-        position_l_by_chr = []
-        for positions in position_l: 
-            position_l_by_chr.append(list(filter(lambda x: x[0] == chrom, positions)))
-        q_tasks.put((position_l_by_chr, genome, chrom, t, fold))
+        pos_posi_l_by_chr = []
+        for pos_posi_dic in pos_posi_l: 
+            pos_posi_l_by_chr.append(pos_posi_dic[chrom])
+        q_tasks.put((pos_posi_l_by_chr, genome, chrom, t, fold))
+        positive_l.append(pos_posi_l_by_chr)
 
     # multiprocessing: allocate workers
     workers = [Process(target=worker_funct(_per_chrom_sample_nullseq_idx),\
          args=(q_tasks, q_results)) for _ in range(p)]
     for each in workers:
         each.start()
-
-    # wait finish of worker processes    
-    for each in workers:
-        each.join()
     
-    # 
+    # harvest results
+    n = len(chrnames)
+    results_l = []
+    while n:
+        if not q_results.empty():
+            results_l += q_results.get()
+            n -= 1
+    results_l.sort(lambda x: x[0])
 
-        
-    return
+    # write bed files
+    fo_l = list(map(lambda x: open(x, "w"), neg_bed_files))
+    for chrom, neg_posi_l in results_l:
+        for i, neg_posi in enumerate(neg_posi_l):
+            outstr_l = map(lambda x: "%s\t%d\t%d" % (chrom, x, x + t), neg_posi)
+            fo_l[i].write('\n'.join(list(outstr_l)))
+
+    for fo in fo_l:
+        fo.close()
+
+    # confirm - debug code -> order check
+    # [0]: chrnames, [1]: peak subsets split by chr
+    chrnames_neg, negative_l = zip(*results_l)
+    print(tuple(chrnames) == tuple(chrnames_neg))
+    return chrnames, positive_l, negative_l
 
 ##
 # Fetch sequence of positive and negative (null) sequences  
 ##
-def fetch_seqs_fa(args_fcts_fa):
+
+def _per_chrom_fetch_seq_fa():
+    ## TODO
+
+
+def writer(q):
+    with open(fn, 'w') as f:
+        while 1:
+            m = q.get()
+            if m == 'kill':
+                f.write('killed')
+                break
+            f.write(str(m) + '\n')
+            f.flush()
+
+def fetch_seqs_fa(chrnames, positive_l, negative_l, t, chr_fa_dir, p):
+    manager = Manager()
+    q = manager.Queue()
+    pool = Pool(p)
+
+    watcher = pool.apply_async(writer, (q,))
+    
+
+    for chrom, posi_l, negi_l in zip(chrnames, positive_l, negative_l):
+        
+
+        
+
+    # multiprocessing: allocate workers
+    queue_l = []
+    for dummy in range(len(positive_l[0])): # iteration with # of subsets
+        queue_l.append(Queue())
+    
+    for 
+    workers = [Process(target=worker_funct(_per_chrom_sample_nullseq_idx),\
+         args=(q_tasks, q_results)) for _ in range(p)]
+    for each in workers:
+        each.start()
+    
+    
+    for chrom in chrnames:
+        
+    chrom_file = args_nidx[0]  # chromosome file (archived)
+    prefix = args_nidx[1]      # name of genome assembly (e.g., hg38)
+    t = args_nidx[2]           # size of window (e.g., 600bp)
+    p = args_nidx[3]           # processes (< # of total chromosomes)
+
+    try:
+        # Open chromosome fa
+        f = open(fn, "r")
+    except IOError as err:
+        print("I/O error: ", err)
+        sys.exit(0)
+
     # args_fcts_pos_neg_seq
     return
 
