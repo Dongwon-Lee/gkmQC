@@ -51,8 +51,8 @@ class gkmOpt(ctypes.Structure):
 # Compute Kernel Matrix
 # (using optimized algorithm in LSGKM)
 ##
-def computeGkmKernel(args):
-    opts = gkmOpt(*args[:len(gkmOpt._fields_)])
+def computeGkmKernel(args_gkm):
+    opts = gkmOpt(*args_gkm)
 
     # create blank numpy obj with aligned memory addr
     # (to be compatible with double ** in ctype func)
@@ -83,7 +83,27 @@ def computeGkmKernel(args):
 ##
 # cross-validate gkm-SVM models 
 ##
-def crossValidate(kmat, n_pseqs, n_nseqs, ncv, nu_auc_regressor):
+def crossValidate(args_svm, kmat, n_pseqs, n_nseqs):
+    '''
+        subparser_comm.add_argument("-C", "--regularization", type=float, default=0.1,
+                help="regularization parameter C")
+        subparser_comm.add_argument("-p", "--epsilon", type=float, default=0.1,
+                help="epsilon in loss function of SVR")
+        subparser_comm.add_argument("-e", "--precision", type=float, default=0.001,
+                help="precision parameter")
+        subparser_comm.add_argument("-M", "--cache-size", type=float, default=512,
+                help="cache memory size in MB")
+        subparser_comm.add_argument("-x", "--cv", type=int, default=5,
+                help="x-fold cross validation for estimating effects of tags in training set")
+        subparser_comm.add_argument("-s", "--random-seeds", type=int, default=1,
+                help="random seed number for reproducibility of cross-validation")
+        subparser_comm.add_argument("-r", "--repeats", type=int, default=1,
+                help="number of repeats of CV training to reduce random variation")
+        subparser_comm.add_argument("-T", "--threads", type=int, default=1,
+                help="number of threads for SVR training; 1, 4, or 16")
+    '''
+    ncv = args_svm[0]
+    nu_auc_regressor = args_svm[1]
     # Answer set
     seqids = \
         list(map(lambda x: "p%4d" % x, range(n_pseqs))) +\
@@ -130,9 +150,12 @@ def crossValidate(kmat, n_pseqs, n_nseqs, ncv, nu_auc_regressor):
 ##
 # init Function
 ##
-def init(args, nu_auc_regressor=None):
-    kmat, n_pseqs, n_nseqs = computeGkmKernel(args)
+def init(args):
+    args_gkm = args[:11]
+    kmat, n_pseqs, n_nseqs = computeGkmKernel(args_gkm)
+    
+    args_svm = args[11:]
     ncv = args[11] # normal of folds
-    auc_score = crossValidate(kmat, n_pseqs, n_nseqs, ncv, nu_auc_regressor)
+    auc_score = crossValidate(args_svm, kmat, n_pseqs, n_nseqs)
 
     return auc_score

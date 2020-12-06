@@ -31,11 +31,11 @@ from ctypes import *
 
 __version__ = '1.0.0'
 
-
 ##
 # nu-auc regressor - will move to gkmQC.py
 ##
-f = open("../data/nu_auc_gb_regressor.pkl", "rb")
+base_data_dir = os.path.abspath('%s/../data' % os.path.dirname(__file__))
+f = open("%s/nu_auc_gb_regressor.pkl" % base_data_dir, "rb")
 nu_auc_regressor = pickle.load(f)
 f.close()
 
