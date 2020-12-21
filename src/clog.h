@@ -341,6 +341,7 @@ clog_free(int id)
             close(_clog_loggers[id]->fd);
         }
         free(_clog_loggers[id]);
+        _clog_loggers[id] = NULL;
     }
 }
 

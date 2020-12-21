@@ -258,6 +258,6 @@ int main(int argc, char** argv)
     free(prob.x);
 
     gkmkernel_destroy(kernel);
-
+    clog_free(LOGGER_ID);
     return 0;
 }

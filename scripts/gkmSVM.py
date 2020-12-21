@@ -1,9 +1,9 @@
 ##!/usr/bin/env python
 """
-    gkmSVM.py: Kernel manipulation, training and test with sklearn lib
+    gkmsvm.py: Kernel manipulation, training and test with sklearn lib
     (internal algorithm is libSVM)
 
-    Copyright (C) 2020 Seong Kyu Han
+    Copyright (C) 2020 Seong Kyu Han, Dongwon Lee
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -23,10 +23,24 @@ import os, sys, pickle
 import ctypes, random, logging
 import numpy as np
 from sklearn.svm import SVC
-from sklearn.model_selection import KFold
+from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_curve, auc
 from sklearn.ensemble import GradientBoostingRegressor
 from itertools import repeat
+
+##
+# nu-auc regressor
+##
+dir_this   = os.path.dirname(os.path.abspath(__file__))
+dir_prnt   = os.path.dirname(dir_this)
+base_data_dir = os.path.join(dir_prnt, "data")
+bin_dir = os.path.join(dir_prnt, "bin")
+
+f = open("%s/nu_auc_gb_regressor.pkl" % base_data_dir, "rb")
+nu_auc_regressor = pickle.load(f)
+f.close()
+
+
 
 ##
 # Options for GKM Kernel 
@@ -52,6 +66,8 @@ class gkmOpt(ctypes.Structure):
 # (using optimized algorithm in LSGKM)
 ##
 def computeGkmKernel(args_gkm):
+    args_gkm[7] = ctypes.c_char_p(bytes(args_gkm[7], 'ascii'))
+    args_gkm[8] = ctypes.c_char_p(bytes(args_gkm[8], 'ascii'))
     opts = gkmOpt(*args_gkm)
 
     # create blank numpy obj with aligned memory addr
@@ -66,17 +82,20 @@ def computeGkmKernel(args_gkm):
     narr_p = narr.ctypes.data_as(c_int_p)
 
     # call ctype func in ../bin/GkmKernel.so
-    _gkmkern_pylib = np.ctypeslib.load_library("gkmkern_pylib.so", "../bin")
+    
+    _gkmkern_pylib = np.ctypeslib.load_library("gkmkern_pylib.so", bin_dir)
     _gkmkern_pylib.gkm_main_pywrapper.restype = ctypes.c_int
     _gkmkern_pylib.gkm_main_pywrapper.argtypes = (ctypes.POINTER(gkmOpt), array_2d_double, c_int_p)
     ret = _gkmkern_pylib.gkm_main_pywrapper(opts, kmat_p, narr_p)
 
     if ret:
+        print("error on kernel construction")
         sys.exit()
 
     n_pseqs, n_nseqs = narr
     n_seqs = n_pseqs + n_nseqs
     kmat = kmat[:n_seqs, :n_seqs] # shrink kernel matrix fit for pos/neg seqs
+    kmat = np.maximum(kmat, kmat.T)
 
     return kmat, n_pseqs, n_nseqs
 
@@ -84,78 +103,207 @@ def computeGkmKernel(args_gkm):
 # cross-validate gkm-SVM models 
 ##
 def crossValidate(args_svm, kmat, n_pseqs, n_nseqs):
-    '''
-        subparser_comm.add_argument("-C", "--regularization", type=float, default=0.1,
-                help="regularization parameter C")
-        subparser_comm.add_argument("-p", "--epsilon", type=float, default=0.1,
-                help="epsilon in loss function of SVR")
-        subparser_comm.add_argument("-e", "--precision", type=float, default=0.001,
-                help="precision parameter")
-        subparser_comm.add_argument("-M", "--cache-size", type=float, default=512,
-                help="cache memory size in MB")
-        subparser_comm.add_argument("-x", "--cv", type=int, default=5,
-                help="x-fold cross validation for estimating effects of tags in training set")
-        subparser_comm.add_argument("-s", "--random-seeds", type=int, default=1,
-                help="random seed number for reproducibility of cross-validation")
-        subparser_comm.add_argument("-r", "--repeats", type=int, default=1,
-                help="number of repeats of CV training to reduce random variation")
-        subparser_comm.add_argument("-T", "--threads", type=int, default=1,
-                help="number of threads for SVR training; 1, 4, or 16")
-    '''
-    ncv = args_svm[0]
-    nu_auc_regressor = args_svm[1]
+   
+    regularization, precision, shrinking, cache_size, ncv,\
+    repeats, fast_estimation, random_seeds = args_svm
+
+    if random_seeds < 0:
+        random_seeds = None
+
     # Answer set
+    #seqids = []
+    #f = open(pos_fa.replace('.fa', '.bed'))
+    #for line in f.readlines():
+    #    seqids.append(line.split()[0])
+    #f.close()
+
+    #f = open(pos_fa.replace('.fa', '.bed'))
+    #for line in f.readlines():
+    #    seqids.append(line.split()[0])
+    #f.close()
+    
+    # fast-mode
     seqids = \
         list(map(lambda x: "p%4d" % x, range(n_pseqs))) +\
-        list(map(lambda x: "p%4d" % x, range(n_nseqs)))
-    y = np.concatenate(np.repeat(1, n_pseqs), np.repeat(0, n_nseqs))
+        list(map(lambda x: "n%4d" % x, range(n_nseqs)))
+    
+    y = np.concatenate((np.repeat(1, n_pseqs), np.repeat(0, n_nseqs)))
 
     # Normal mode: 5-fold cross-validation
-    if nu_auc_regressor == None:
-        kf = KFold(n_splits=ncv)
-        tprs = []
+    if not fast_estimation:
+
+        mean_aucs = []
         aucs = []
-        mean_fpr = np.linspace(0, 1, 100)
+        for _ in range(repeats):
+            kf = StratifiedKFold(n_splits=ncv, shuffle=True, random_state=random_seeds)
+            tprs = []
+            mean_fpr = np.linspace(0, 1, 100)
 
-        for trainIdx, testIdx in kf.split(seqids):
-            y_train, y_test = y[trainIdx], y[testIdx]
-            k_train = kmat[trainIdx, :][:, trainIdx]
-            k_test  = kmat[trainIdx, :][:, testIdx]
-            sv = SVC(kernel="precomputed", C=1.0, tol=1e-3, shrinking=False, gamma=1.0, cache_size=256)
-            y_prob_ = sv.fit(k_train, y_train).predict_proba(k_test)
-            #y_pred = sv.predict(k_test)
+            for trainIdx, testIdx in kf.split(seqids, y):
+                y_train, y_test = y[trainIdx], y[testIdx]
+                k_train = kmat[trainIdx, :][:, trainIdx]
+                k_test  = kmat[testIdx, :][:, trainIdx]
+                sv = SVC(
+                    kernel="precomputed",
+                    C=regularization,
+                    tol=precision,
+                    shrinking=shrinking,
+                    gamma=1.0,
+                    cache_size=cache_size
+                )
+                y_score = sv.fit(k_train, y_train).decision_function(k_test)
 
-            # interpolate tpr according to fpr
-            fpr, tpr, _ = roc_curve(y_test, y_prob_[:, 1])
-            interp_tpr = np.interp(mean_fpr, fpr, tpr)
-            interp_tpr[0] = 0.0
-            tprs.append(interp_tpr)
-            aucs.append(auc(fpr, tpr))
+                # interpolate tpr according to fpr
+                fpr, tpr, _ = roc_curve(y_test, y_score)
+                interp_tpr = np.interp(mean_fpr, fpr, tpr)
+                interp_tpr[0] = 0.0
+                tprs.append(interp_tpr)
+                aucs.append(auc(fpr, tpr))
 
-        # calculate mean-AUC
-        mean_tpr = np.mean(tprs, axis=0)
-        mean_tpr[-1] = 1.0
-        auc_score = auc(mean_fpr, mean_tpr)
-        #auc_std = np.std(aucs)
+            # calculate mean-AUC
+            mean_tpr = np.mean(tprs, axis=0)
+            mean_tpr[-1] = 1.0
+            mean_auc = auc(mean_fpr, mean_tpr)
+            mean_aucs.append(mean_auc)
+
+        # repeat
+        auc_score = np.mean(mean_aucs)
+        auc_std = np.std(aucs)
 
     # Fast mode: AUC estimation based on nu values from single training
-    # using Gradient-boost regressor
+    # using local regressor
     else:
-        sv = SVC(kernel="precomputed", C=1.0, tol=1e-3, shrinking=False, gamma=1.0, cache_size=256) # TODO: fit param
-        sv.fit(kmat, y)
-        auc_score = nu_auc_regressor.predict(np.atleast_2d([sv.nu]).T)[0]
+        sv = SVC(
+            kernel="precomputed",
+            C=regularization,
+            tol=precision,
+            shrinking=shrinking,
+            gamma=1.0,
+            cache_size=cache_size
+        )
+        sv.fit(kmat, y) 
+        nu = np.sum(np.abs(sv.dual_coef_[0])) / len(y)
+        auc_score = nu_auc_regressor.predict(np.atleast_2d([nu]).T)[0]
+        auc_std = np.nan
 
-    return auc_score # (auc_score, auc_std)
+    return (auc_score, auc_std)
 
 ##
 # init Function
 ##
-def init(args):
-    args_gkm = args[:11]
+def init(pos_fa, neg_fa, args):
+    
+    args_gkm = [
+        args.kernel_type,
+        args.full_word_length, # l
+        args.non_gap_length, # k
+        args.max_num_gaps, # d
+        args.init_decay, # M
+        args.half_life_decay, # H
+        args.rbf_gamma, # gamma
+        pos_fa,
+        neg_fa,
+        args.n_processes,
+        args.verbosity
+    ]
+
     kmat, n_pseqs, n_nseqs = computeGkmKernel(args_gkm)
     
-    args_svm = args[11:]
-    ncv = args[11] # normal of folds
-    auc_score = crossValidate(args_svm, kmat, n_pseqs, n_nseqs)
+    args_svm = [
+        args.regularization,
+        args.precision,
+        args.shrinking,
+        args.cache_size,
+        args.ncv,
+        args.repeats,
+        args.fast_estimation,
+        args.random_seeds,
+    ]
+    
+    auc_score, auc_std = crossValidate(args_svm, kmat, n_pseqs, n_nseqs)
+    
+    # write results to out file
+    eval_out_file = args.name + ".gkmqc.eval.out"
+    fa = open(eval_out_file, "a")
+    fa.write('\t'.join(map(str, [pos_fa, neg_fa, n_pseqs, auc_score, auc_std])), end="\n")
+    fa.close()
 
-    return auc_score
+import argparse
+
+if __name__ == '__main__':
+
+    desc_txt = "\n".join([
+        "lsgkm-pywrapper with fast kernel-mat construction",
+        "sequence-based predictive model with gapped-kmer kernel (Lee 2016).",
+        "LIBSVM (Chang & Lin 2011) was used for implementing SVC.",
+        "-- Seong Kyu Han (seongkyu.han@childrens.harvard.edu),",
+        "-- Dongwon Lee (dongwon.lee@childrens.harvard.edu)"
+    ])
+
+    parser = argparse.ArgumentParser(description=desc_txt,
+        formatter_class=argparse.RawTextHelpFormatter)
+
+    parser.add_argument("-p", "--pos-fa", type=str, required=True,
+        help="positive fa file. REQUIRED")
+    parser.add_argument("-n", "--neg-fa", type=str, required=True,
+        help="negative fa file. REQUIRED")
+    parser.add_argument("-w", "--name", type=str, required=True,
+        help="prefix of output file to write AUC score. REQUIRED")
+    parser.add_argument("-s", "--random-seeds", type=int, default=-1,
+        help="random seed number\nfor reproducibility\n(default: no seed)")
+    parser.add_argument("-@", "--n-processes", type=str, default=4,
+        help="number of processes\n(default: 4)")
+
+    group_gkm = parser.add_argument_group('gkm-kernel')
+    group_gkm.add_argument("-t", "--kernel-type", type=int, default=4,
+        help="\n".join([
+            "kernel function\n(default: 4 wgkm)",
+            "NOTE: RBF kernels (3 and 5) work best with -c 10 -g 2",
+            "0 -- gapped-kmer",
+            "1 -- estimated l-mer with full filter",
+            "2 -- estimated l-mer with truncated filter (gkm)",
+            "3 -- gkm + RBF (gkmrbf)",
+            "4 -- gkm + center weighted (wgkm)",
+            "     weight = max(M, floor(M*exp(-ln(2)*D/H)+1))",
+            "5 -- gkm + center weighted + RBF (wgkmrbf)"
+        ]))        
+    group_gkm.add_argument("-L", "--full-word-length", type=int, default=10,
+        help="full word length including gaps, 3<=L<=12\n(default: 10)")
+    group_gkm.add_argument("-k", "--non-gap-length", type=int, default=6,
+        help="number of non-gap positions, k<=L\n(default: 6)")
+    group_gkm.add_argument("-d", "--max-num-gaps", type=int, default=3,
+        help="maximum number of gaps allowed, d<=min(4, L-k)\n(default: 3)")
+    group_gkm.add_argument("-M", "--init-decay", type=int, default=50,
+        help="\n".join([
+            "the initial value (M) of the exponential decay function",
+            "for wgkm-kernels. max=255, -t 4 or 5 only\n(default: 50)"
+        ]))
+    group_gkm.add_argument("-H", "--half-life-decay", type=int, default=50,
+        help="\n".join([
+            "set the half-life parameter (H) that is the distance (D) required",
+            "to fall to half of its initial value in the exponential decay",
+            "function for wgkm-kernels. -t 4 or 5 only\n(default: 50)"
+        ]))
+    group_gkm.add_argument("-G", "--rbf-gamma", type=float, default=1.0,
+        help="gamma for RBF kernel. -t 3 or 5 only\n(default: 1.0)")
+
+    ## svm training options
+    group_svm = parser.add_argument_group('SVM training')
+    group_svm.add_argument("-C", "--regularization", type=float, default=1.0,
+        help="regularization parameter C\n(default: 1.0)")
+    group_svm.add_argument("-e", "--precision", type=float, default=0.001,
+        help="set the precision parameter epsilon\n(default: 0.001)")
+    group_svm.add_argument("-u", "--shrinking", type=bool, default=False,
+        help="if set, use the shrinking heuristics\n(default: False)")
+    group_svm.add_argument("-c", "--cache-size", type=float, default=512,
+        help="cache memory size in MB\n(default: 512MB)")
+    group_svm.add_argument("-x", "--ncv", type=int, default=5,
+        help="x-fold cross validation\nfor estimating effects of tags in training set\n(default: 5)")
+    group_svm.add_argument("-r", "--repeats", type=int, default=1,
+        help="number of repeats of CV training\nto reduce random variation\n(default: 1)")
+    group_svm.add_argument("-f", "--fast-estimation", type=bool, default=False,
+        help="fast estimation of AUC without nCV:\nusing nu score from trained SVM\n(default: False)")
+
+    # args processing codes
+    args = parser.parse_args()
+    init(args.pos_fa, args.neg_fa, args)

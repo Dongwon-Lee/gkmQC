@@ -83,13 +83,18 @@ typedef struct _gkmOpt {
 
 static void *pthread_gkmkernel_kernelfunc_batch_all(void *ptr)
 {
-    int i;
+    int i, i_lim;
     gkmkernel_pthread_data_t *td = (gkmkernel_pthread_data_t *) ptr;
     int NTHREADS = td->nthreads;
+    int LTHREADS = td->kernel->prob_num % NTHREADS;
 
-    for (i = 0; i < td->kernel->prob_num/NTHREADS; i++) {
-        int a = (i*NTHREADS) + td->task_ind;
-        gkmkernel_kernelfunc_batch_all(td->kernel, a, 0, a, td->res[i]); 
+    i_lim = td->kernel->prob_num/NTHREADS;
+    if (LTHREADS > 0 && td->task_ind < LTHREADS) {
+        i_lim++;
+    }
+    for (i = 0; i < i_lim; i++) { // i % TTHREADS
+        int a = (i*NTHREADS) + td->task_ind; 
+        gkmkernel_kernelfunc_batch_all(td->kernel, a, 0, a, td->res[i]);
         if (i % 10 == 0) {
             clog_info(CLOG(LOGGER_ID), "  Thread %d, i = %d", td->task_ind, i);
         }
@@ -101,8 +106,8 @@ static void *pthread_gkmkernel_kernelfunc_batch_all(void *ptr)
 extern "C" {
     int gkm_main_pywrapper(gkmOpt *opts, double **kmat, int *kmat_size)
     {
-        int i, j, k;
-        int npos, row;
+        int i, j;
+        int npos;
         gkm_parameter param;
         svm_problem prob;
         
@@ -177,6 +182,8 @@ extern "C" {
 
         // multithreads by line
         int NTHREADS = opts->nthreads;
+        int LASTHRDS = prob.l % NTHREADS;
+
         gkmkernel_pthread_data_t *td;
         pthread_t *threads;
 
@@ -188,9 +195,15 @@ extern "C" {
             td[i].kernel = kernel;
             td[i].task_ind = i;
             td[i].nthreads = NTHREADS;
-            td[i].res = (double **) malloc(sizeof(double *) * ((size_t) prob.l/(unsigned int)NTHREADS));
-            for(j = 0; j < prob.l/NTHREADS; j++) {
-                td[i].res[j] = (double *) malloc(sizeof(double) * 10000);
+            td[i].res = (double **) malloc(sizeof(double *) * ((size_t) prob.l/(unsigned int)NTHREADS + 1));
+            
+            for(j = 0; j < prob.l/NTHREADS; j++) { // boundary condition if prob.l/NTHREADS > 0
+                //td[i].res[j] = (double *) malloc(sizeof(double) * 15000); // legacy code
+                td[i].res[j] = kmat[j * NTHREADS + i]; // kmat pointer assignment -> efficient memory
+            }
+            if(LASTHRDS > 0 && i < LASTHRDS) { // for the last threads
+                j++;
+                td[i].res[j] = kmat[j * NTHREADS + i];
             }
         }
 
@@ -218,14 +231,9 @@ extern "C" {
             }
         }
 
-        for(i = 0; i < prob.l/NTHREADS; i++) {
-            for(j = 0; j < NTHREADS; j++) {
-                row = i * NTHREADS + j;
-                for(k = 0; k < (i * NTHREADS) + j; k++) {
-                    kmat[row][k] = td[j].res[i][k];
-                }
-                kmat[row][row] = 1.0;
-            }
+        // fill 1.0 on diagonal line
+        for (i=0; i<prob.l; i++) {
+            kmat[i][i] = 1.0;
         }
 
         kmat_size[0] = npos;
@@ -233,10 +241,10 @@ extern "C" {
 
         // free memory
         for(j = 0; j < NTHREADS; j++) {
-            for(i = 0; i < prob.l/NTHREADS; i++) {
-                free(td[j].res[i]);
-            }
-            free(td[j].res);
+            //for(i = 0; i < prob.l/NTHREADS; i++) {
+            //   free(td[j].res[i]); // TO REMOVE
+            //}
+            free(td[j].res); // KEEP
         }
         free(td);
 
@@ -248,6 +256,7 @@ extern "C" {
         free(prob.x);
 
         gkmkernel_destroy(kernel);
+        clog_free(LOGGER_ID);
 
         return 0;
     }
