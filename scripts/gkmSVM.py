@@ -1,4 +1,5 @@
-##!/usr/bin/env python
+#!/usr/bin/env python
+
 """
     gkmsvm.py: Kernel manipulation, training and test with sklearn lib
     (internal algorithm is libSVM)
@@ -225,7 +226,7 @@ def init(pos_fa, neg_fa, args):
     # write results to out file
     eval_out_file = args.name + ".gkmqc.eval.out"
     fa = open(eval_out_file, "a")
-    fa.write('\t'.join(map(str, [pos_fa, neg_fa, n_pseqs, auc_score, auc_std])), end="\n")
+    fa.write('\t'.join(map(str, [pos_fa, neg_fa, n_pseqs, auc_score, auc_std])) + "\n")
     fa.close()
 
 import argparse
@@ -251,8 +252,10 @@ if __name__ == '__main__':
         help="prefix of output file to write AUC score. REQUIRED")
     parser.add_argument("-s", "--random-seeds", type=int, default=-1,
         help="random seed number\nfor reproducibility\n(default: no seed)")
-    parser.add_argument("-@", "--n-processes", type=str, default=4,
+    parser.add_argument("-@", "--n-processes", type=int, default=4,
         help="number of processes\n(default: 4)")
+    parser.add_argument("-v", "--verbosity", type=int, default=1,
+        help="verbosity\n(default: 1), 0: silent")
 
     group_gkm = parser.add_argument_group('gkm-kernel')
     group_gkm.add_argument("-t", "--kernel-type", type=int, default=4,
@@ -295,7 +298,7 @@ if __name__ == '__main__':
         help="set the precision parameter epsilon\n(default: 0.001)")
     group_svm.add_argument("-u", "--shrinking", type=bool, default=False,
         help="if set, use the shrinking heuristics\n(default: False)")
-    group_svm.add_argument("-c", "--cache-size", type=float, default=512,
+    group_svm.add_argument("-c", "--cache-size", type=int, default=512,
         help="cache memory size in MB\n(default: 512MB)")
     group_svm.add_argument("-x", "--ncv", type=int, default=5,
         help="x-fold cross validation\nfor estimating effects of tags in training set\n(default: 5)")
