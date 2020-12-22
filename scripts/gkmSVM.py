@@ -131,7 +131,7 @@ def crossValidate(args_svm, kmat, n_pseqs, n_nseqs):
     y = np.concatenate((np.repeat(1, n_pseqs), np.repeat(0, n_nseqs)))
 
     # Normal mode: 5-fold cross-validation
-    if not fast_estimation:
+    if fast_estimation == 0:
 
         mean_aucs = []
         aucs = []
@@ -148,7 +148,7 @@ def crossValidate(args_svm, kmat, n_pseqs, n_nseqs):
                     kernel="precomputed",
                     C=regularization,
                     tol=precision,
-                    shrinking=shrinking,
+                    shrinking=bool(shrinking),
                     gamma=1.0,
                     cache_size=cache_size
                 )
@@ -178,7 +178,7 @@ def crossValidate(args_svm, kmat, n_pseqs, n_nseqs):
             kernel="precomputed",
             C=regularization,
             tol=precision,
-            shrinking=shrinking,
+            shrinking=bool(shrinking),
             gamma=1.0,
             cache_size=cache_size
         )
@@ -296,16 +296,16 @@ if __name__ == '__main__':
         help="regularization parameter C\n(default: 1.0)")
     group_svm.add_argument("-e", "--precision", type=float, default=0.001,
         help="set the precision parameter epsilon\n(default: 0.001)")
-    group_svm.add_argument("-u", "--shrinking", type=bool, default=False,
-        help="if set, use the shrinking heuristics\n(default: False)")
+    group_svm.add_argument("-u", "--shrinking", type=int, default=0,
+        help="if set, use the shrinking heuristics\n(default: 0)")
     group_svm.add_argument("-c", "--cache-size", type=int, default=512,
         help="cache memory size in MB\n(default: 512MB)")
     group_svm.add_argument("-x", "--ncv", type=int, default=5,
         help="x-fold cross validation\nfor estimating effects of tags in training set\n(default: 5)")
     group_svm.add_argument("-r", "--repeats", type=int, default=1,
         help="number of repeats of CV training\nto reduce random variation\n(default: 1)")
-    group_svm.add_argument("-f", "--fast-estimation", type=bool, default=False,
-        help="fast estimation of AUC without nCV:\nusing nu score from trained SVM\n(default: False)")
+    group_svm.add_argument("-f", "--fast-estimation", type=int, default=0,
+        help="fast estimation of AUC without nCV:\nusing nu score from trained SVM\n(default: 0)")
 
     # args processing codes
     args = parser.parse_args()
