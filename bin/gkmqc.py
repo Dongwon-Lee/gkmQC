@@ -198,16 +198,16 @@ def main():
             help="regularization parameter C\n(default: 1.0)")
         group_svm.add_argument("-e", "--precision", type=float, default=0.001,
             help="set the precision parameter epsilon\n(default: 0.001)")
-        group_svm.add_argument("-u", "--shrinking", type=bool, default=False,
-            help="if set, use the shrinking heuristics\n(default: False)")
+        group_svm.add_argument("-u", "--shrinking", type=int, default=0,
+            help="if set, use the shrinking heuristics\n(default: 0)")
         group_svm.add_argument("-c", "--cache-size", type=int, default=512,
             help="cache memory size in MB\n(default: 512MB)")
         group_svm.add_argument("-x", "--ncv", type=int, default=5,
             help="x-fold cross validation\nfor estimating effects of tags in training set\n(default: 5)")
         group_svm.add_argument("-r", "--repeats", type=int, default=1,
             help="number of repeats of CV training\nto reduce random variation\n(default: 1)")
-        group_svm.add_argument("-f", "--fast-estimation", type=bool, default=False,
-            help="fast estimation of AUC without nCV:\nusing nu score from trained SVM\n(default: False)")
+        group_svm.add_argument("-f", "--fast-estimation", type=int, default=0,
+            help="fast estimation of AUC without nCV:\nusing nu score from trained SVM\n(default: 0)")
         
     args = parser.parse_args()
 
@@ -326,12 +326,16 @@ def main():
         select_seqs_exe = os.path.join(dir_scripts, "seqs_select.py")
         for bed in pos_bed_files:
             fa = bed.replace('.bed', '.fa')
+            if os.path.isfile(fa):
+                continue
             os.system("python %s %s.e%d.qc.fa %s >%s" %\
                 (select_seqs_exe, args.name, args.window_bp / 2, bed, fa))
 
         genome_fa_dir = os.path.join(dir_data, args.genome_assembly, 'fa')
         for bed in neg_bed_files:
             fa = bed.replace('.bed', '.fa')
+            if os.path.isfile(fa):
+                continue
             os.system("python %s/seqs_fetch.py -d %s %s %s" %\
                 (dir_scripts, genome_fa_dir, bed, fa))
     
@@ -351,19 +355,21 @@ def main():
             sbatch_exe = os.path.join(dir_scripts, "gkmsvm_slurm.sh")
             gkmsvm_py  = os.path.join(dir_scripts, "gkmsvm.py")
             gkmsvm_args = [
-                "-w", "-s", "-@",
+                "-w", "-s", "-@", "-v",
                 "-t", "-L", "-k", "-d", "-M", "-H", "-G",
                 "-C", "-e", "-u", "-c", "-x", "-r", "-f"
             ]
             gkmsvm_vals = [
-                args.name, args.random_seeds, args.n_processes,
+                args.name, args.random_seeds, args.n_processes, args.verbosity,
                 args.kernel_type, args.full_word_length, args.non_gap_length,
                 args.max_num_gaps, args.init_decay, args.half_life_decay,
                 args.rbf_gamma, args.regularization, args.precision, args.shrinking,
                 args.cache_size, args.ncv, args.repeats, args.fast_estimation   
             ]
-            args_vals_pairs = map(lambda x: ' '.join(x), zip(gkmsvm_args, gkmsvm_vals))
+            gkmsvm_vals = list(map(str, gkmsvm_vals))
+            args_vals_pairs = map(lambda x: ' '.join(x), list(zip(gkmsvm_args, gkmsvm_vals)))
             argc = ' '.join(list(args_vals_pairs))
+            print(argc)
             for pos_fa, neg_fa in zip(pos_fa_files, neg_fa_files):
                 os.system("sbatch --export=NONE %s %s -p %s -n %s %s" %\
                 (sbatch_exe, gkmsvm_py, pos_fa, neg_fa, argc))
