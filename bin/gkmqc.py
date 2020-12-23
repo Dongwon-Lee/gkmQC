@@ -323,21 +323,21 @@ def main():
         neg_fa_files = list(map(lambda x: x.replace('.bed', '.fa'), neg_bed_files))
 
         # retrieve fa
-        select_seqs_exe = os.path.join(dir_scripts, "seqs_select.py")
-        for bed in pos_bed_files:
-            fa = bed.replace('.bed', '.fa')
-            if os.path.isfile(fa):
-                continue
-            os.system("python %s %s.e%d.qc.fa %s >%s" %\
-                (select_seqs_exe, args.name, args.window_bp / 2, bed, fa))
+        #select_seqs_exe = os.path.join(dir_scripts, "seqs_select.py")
+        #for bed in pos_bed_files:
+        #    fa = bed.replace('.bed', '.fa')
+        #    if os.path.isfile(fa):
+        #        continue
+        #    os.system("python %s %s.e%d.qc.fa %s >%s" %\
+        #        (select_seqs_exe, args.name, args.window_bp / 2, bed, fa))
 
-        genome_fa_dir = os.path.join(dir_data, args.genome_assembly, 'fa')
-        for bed in neg_bed_files:
-            fa = bed.replace('.bed', '.fa')
-            if os.path.isfile(fa):
-                continue
-            os.system("python %s/seqs_fetch.py -d %s %s %s" %\
-                (dir_scripts, genome_fa_dir, bed, fa))
+        #genome_fa_dir = os.path.join(dir_data, args.genome_assembly, 'fa')
+        #for bed in neg_bed_files:
+        #    fa = bed.replace('.bed', '.fa')
+        #    if os.path.isfile(fa):
+        #        continue
+        #    os.system("python %s/seqs_fetch.py -d %s %s %s" %\
+        #        (dir_scripts, genome_fa_dir, bed, fa))
     
         ## cross-validate with gkmSVM
         # without job schedular

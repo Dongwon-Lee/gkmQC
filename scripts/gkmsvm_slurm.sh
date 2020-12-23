@@ -9,5 +9,5 @@
 
 #set -o errexit
 #set -o nounset
-source ~/program/miniforge3/bin/activate scatac
+source activate gkmqc
 $@

@@ -88,7 +88,7 @@ def make_qc_posset(gkmqc_out_dir, args):
     posf0 = "%s.bed" % prefix
     posf0_prof = "%s.prof" % prefix
     posf = "%s.qc.bed" % prefix
-    posf_fasta = "%s.qc.fa" % prefix
+    #posf_fasta = "%s.qc.fa" % prefix
 
     # 1. make fixed length peaks
     print("make fixed length peaks")
@@ -120,19 +120,19 @@ def make_qc_posset(gkmqc_out_dir, args):
             (posf0_prof, posf0, posf))
     
     # 4. make fasta file
-    print("make fasta file")
-    skip_flag = False
-    if os.path.isfile(posf_fasta):
-        n2 = 2 * int(subprocess.getoutput("cat %s | wc -l" % posf))
-        s2 = int(subprocess.getoutput("cat %s | wc -l" % posf_fasta))
-        if n2 == s2:
-            print("skip making %s" % posf_fasta)
-            skip_flag = True
+    #print("make fasta file")
+    #skip_flag = False
+    #if os.path.isfile(posf_fasta):
+    #    n2 = 2 * int(subprocess.getoutput("cat %s | wc -l" % posf))
+    #    s2 = int(subprocess.getoutput("cat %s | wc -l" % posf_fasta))
+    #    if n2 == s2:
+    #        print("skip making %s" % posf_fasta)
+    #        skip_flag = True
 
-    if not skip_flag:
-        genome_fa_dir = os.path.join(base_data_dir, genome_assembly, 'fa')
-        os.system("python %s/seqs_fetch.py -d %s %s %s" %\
-            (dir_scripts, genome_fa_dir, posf, posf_fasta))
+    #if not skip_flag:
+    #    genome_fa_dir = os.path.join(base_data_dir, genome_assembly, 'fa')
+    #    os.system("python %s/seqs_fetch.py -d %s %s %s" %\
+    #        (dir_scripts, genome_fa_dir, posf, posf_fasta))
 
 ##
 # split the positive set by p-value 
@@ -162,12 +162,16 @@ def split_posset(gkmqc_out_dir, args):
     for i in range(1, ntests + 1):
         skipn = (i - 1) * split_n + 1
         if i == ntests:
-            subprocess.Popen("tail -n +%d %s.tmp.sorted | sortBed >%s.top%d.bed" %\
+            sp = subprocess.Popen("tail -n +%d %s.tmp.sorted | sortBed >%s.top%d.bed" %\
                 (skipn, posf, posf[:-4], i), shell=True, stdin=PIPE, stdout=PIPE)
+            sp.communicate()
         else:
-            subprocess.Popen("tail -n +%d %s.tmp.sorted | head -n %d | sortBed >%s.top%d.bed" %\
+            sp = subprocess.Popen("tail -n +%d %s.tmp.sorted | head -n %d | sortBed >%s.top%d.bed" %\
                 (skipn, posf, split_n, posf[:-4], i), shell=True, stdin=PIPE, stdout=PIPE)
+            sp.communicate()
+                   
     # Remove
+    #os.fsync()
     os.system("rm -f %s.tmp.sorted" % posf)
 
     return ntests

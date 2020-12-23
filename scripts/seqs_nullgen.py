@@ -25,6 +25,7 @@ import zipfile, tarfile
 import random
 
 from bitarray import bitarray
+from pyfasta import Fasta
 import numpy as np
 from multiprocessing import Pool
 from collections.abc import Iterable
@@ -429,7 +430,7 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
     pool = Pool(p)
     results_l = pool.map(pool_wrapper_nidx_sample, args_l)
 
-    n = len(chrnames)
+    #n = len(chrnames)
     results_l.sort(key=lambda x: x[0])
 
     # write bed files
@@ -439,6 +440,29 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
             #print(ineg_posi[1])
             outstr_l = map(lambda x: "%s\t%d\t%d" % (chrom, x, x + t), sorted(neg_posi))
             fo_l[i].write('\n'.join(list(outstr_l)) + '\n')
+
+    for fo in fo_l:
+        fo.close()
+    
+    print("fetch fasta seq...")
+    # write fa files (pos, neg)
+    fa_files = list(map(lambda x: x.replace('.bed', '.fa'), pos_bed_files + neg_bed_files))
+    fo_l = list(map(lambda x: open(x, "w"), fa_files))
+    for pos_posi_l, (chrom, neg_posi_l) in zip(positive_l, results_l):
+        print(chrom)
+        # load fasta object
+        chr_fa = os.path.join(base_data_dir, '%s/fa/%s.fa' % (genome, chrom))
+        f = Fasta(chr_fa)[chrom]
+
+        # write fa to files
+        for pos_posi, (i, neg_posi) in zip(pos_posi_l, neg_posi_l):
+            for x in pos_posi:
+                outstr = ">%s:%d-%d\n%s\n\n" % (chrom, x+1, x+t, f[x:x+t].upper())
+                fo_l[i].write(outstr)
+
+            for x in neg_posi:
+                outstr = ">%s:%d-%d\n%s\n\n" % (chrom, x+2, x+t+1, f[x:x+t].upper())
+                fo_l[i+len(pos_bed_files)].write(outstr)
 
     for fo in fo_l:
         fo.close()
