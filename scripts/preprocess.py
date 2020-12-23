@@ -194,8 +194,8 @@ def make_negset(gkmqc_out_dir, args):
     ext_len = window_bp / 2
     prefix = "%s.e%d" % (prefix, ext_len)
 
-    pos_bed_files = list(map(lambda x: "%s.qc.top%d.bed" % (prefix, x), range(rank_start, rank_end)))
-    neg_bed_files = list(map(lambda x: "%s.qc.top%d.nr1.bed" % (prefix, x), range(rank_start, rank_end)))
+    pos_bed_files = list(map(lambda x: "%s.qc.top%d.bed" % (prefix, x), range(rank_start, rank_end + 1)))
+    neg_bed_files = list(map(lambda x: "%s.qc.top%d.nr1.bed" % (prefix, x), range(rank_start, rank_end + 1)))
 
     pos_exist_l = len([f for f in pos_bed_files if os.path.isfile(f)])
     neg_exist_l = len([f for f in neg_bed_files if os.path.isfile(f)])

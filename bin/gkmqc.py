@@ -98,8 +98,8 @@ def main():
     group_opt_nidx = subparser_nidx.add_argument_group('optional arguments')
     group_opt_nidx.add_argument("-w", "--window-bp", type=int, default=600,
         help="size of scanning window\n(default: 600bp)")
-    group_opt_nidx.add_argument("-@", "--n-processes", type=int, default=10,
-        help="number of processes\n(default: 10)")
+    group_opt_nidx.add_argument("-@", "--n-processes", type=int, default=1,
+        help="number of processes\n(default: 1)")
     
     # parser for the "evaluate" command
     group_req_eval = subparser_eval.add_argument_group('required arguments')
@@ -151,8 +151,8 @@ def main():
             help="Repeat errors allowed in generating null-seq\n(default=0.02)")
         group_opt.add_argument("-s", "--random-seeds", type=int, default=-1,
             help="random seed number\nfor reproducibility\n(default: no seed)")
-        group_opt.add_argument("-@", "--n-processes", type=int, default=10,
-            help="number of processes\n(default: 10)")
+        group_opt.add_argument("-@", "--n-processes", type=int, default=1,
+            help="number of processes\n(default: 1)")
         group_opt.add_argument("-v", "--verbosity", type=int, default=1,
             help="verbosity\n(default: 1), 0: silent")
 
@@ -204,7 +204,7 @@ def main():
             help="cache memory size in MB\n(default: 512MB)")
         group_svm.add_argument("-x", "--ncv", type=int, default=5,
             help="x-fold cross validation\nfor estimating effects of tags in training set\n(default: 5)")
-        group_svm.add_argument("-r", "--repeats", type=int, default=1,
+        group_svm.add_argument("-r", "--repeats", type=int, default=10,
             help="number of repeats of CV training\nto reduce random variation\n(default: 1)")
         group_svm.add_argument("-f", "--fast-estimation", type=int, default=0,
             help="fast estimation of AUC without nCV:\nusing nu score from trained SVM\n(default: 0)")

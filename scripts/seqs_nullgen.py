@@ -460,8 +460,8 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
                 outstr = ">%s:%d-%d\n%s\n\n" % (chrom, x+1, x+t, f[x:x+t].upper())
                 fo_l[i].write(outstr)
 
-            for x in neg_posi:
-                outstr = ">%s:%d-%d\n%s\n\n" % (chrom, x+2, x+t+1, f[x:x+t].upper())
+            for x in sorted(neg_posi):
+                outstr = ">%s:%d-%d\n%s\n\n" % (chrom, x+1, x+t, f[x:x+t].upper())
                 fo_l[i+len(pos_bed_files)].write(outstr)
 
     for fo in fo_l:

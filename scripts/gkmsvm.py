@@ -25,7 +25,7 @@ import ctypes, random, logging
 import numpy as np
 from sklearn.svm import SVC
 from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import roc_auc_score
 from sklearn.ensemble import GradientBoostingRegressor
 from itertools import repeat
 
@@ -37,9 +37,9 @@ dir_prnt   = os.path.dirname(dir_this)
 base_data_dir = os.path.join(dir_prnt, "data")
 bin_dir = os.path.join(dir_prnt, "bin")
 
-f = open("%s/nu_auc_gb_regressor.pkl" % base_data_dir, "rb")
-nu_auc_regressor = pickle.load(f)
-f.close()
+#f = open("%s/nu_auc_gb_regressor.pkl" % base_data_dir, "rb")
+#nu_auc_regressor = pickle.load(f)
+#f.close()
 
 
 
@@ -133,12 +133,12 @@ def crossValidate(args_svm, kmat, n_pseqs, n_nseqs):
     # Normal mode: 5-fold cross-validation
     if fast_estimation == 0:
 
-        mean_aucs = []
+        #mean_aucs = []
         aucs = []
         for _ in range(repeats):
             kf = StratifiedKFold(n_splits=ncv, shuffle=True, random_state=random_seeds)
-            tprs = []
-            mean_fpr = np.linspace(0, 1, 100)
+            #tprs = []
+            #mean_fpr = np.linspace(0, 1, 100)
 
             for trainIdx, testIdx in kf.split(seqids, y):
                 y_train, y_test = y[trainIdx], y[testIdx]
@@ -154,21 +154,24 @@ def crossValidate(args_svm, kmat, n_pseqs, n_nseqs):
                 )
                 y_score = sv.fit(k_train, y_train).decision_function(k_test)
 
+                auc = roc_auc_score(y_test, y_score)
+                aucs.append(auc)
                 # interpolate tpr according to fpr
-                fpr, tpr, _ = roc_curve(y_test, y_score)
-                interp_tpr = np.interp(mean_fpr, fpr, tpr)
-                interp_tpr[0] = 0.0
-                tprs.append(interp_tpr)
-                aucs.append(auc(fpr, tpr))
+                #fpr, tpr, _ = roc_curve(y_test, y_score)
+                #interp_tpr = np.interp(mean_fpr, fpr, tpr)
+                #interp_tpr[0] = 0.0
+                #tprs.append(interp_tpr)
+                #aucs.append(auc(fpr, tpr))
 
             # calculate mean-AUC
-            mean_tpr = np.mean(tprs, axis=0)
-            mean_tpr[-1] = 1.0
-            mean_auc = auc(mean_fpr, mean_tpr)
-            mean_aucs.append(mean_auc)
+            #mean_tpr = np.mean(tprs, axis=0)
+            #mean_tpr[-1] = 1.0
+            #mean_auc = auc(mean_fpr, mean_tpr)
+            #mean_aucs.append(mean_auc)
 
         # repeat
-        auc_score = np.mean(mean_aucs)
+        #auc_score = np.mean(mean_aucs)
+        auc_score = np.mean(aucs)
         auc_std = np.std(aucs)
 
     # Fast mode: AUC estimation based on nu values from single training
@@ -183,9 +186,9 @@ def crossValidate(args_svm, kmat, n_pseqs, n_nseqs):
             cache_size=cache_size
         )
         sv.fit(kmat, y) 
-        nu = np.sum(np.abs(sv.dual_coef_[0])) / len(y)
-        auc_score = nu_auc_regressor.predict(np.atleast_2d([nu]).T)[0]
-        auc_std = np.nan
+        #nu = np.sum(np.abs(sv.dual_coef_[0])) / len(y)
+        #auc_score = nu_auc_regressor.predict(np.atleast_2d([nu]).T)[0]
+        #auc_std = np.nan
 
     return (auc_score, auc_std)
 
@@ -252,8 +255,8 @@ if __name__ == '__main__':
         help="prefix of output file to write AUC score. REQUIRED")
     parser.add_argument("-s", "--random-seeds", type=int, default=-1,
         help="random seed number\nfor reproducibility\n(default: no seed)")
-    parser.add_argument("-@", "--n-processes", type=int, default=4,
-        help="number of processes\n(default: 4)")
+    parser.add_argument("-@", "--n-processes", type=int, default=1,
+        help="number of processes\n(default: 1)")
     parser.add_argument("-v", "--verbosity", type=int, default=1,
         help="verbosity\n(default: 1), 0: silent")
 
