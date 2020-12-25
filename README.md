@@ -6,6 +6,7 @@ It trains a support vector classifier (SVC) using gapped-kmer kernels
 (Ghandi et al., 2014; Lee, 2016), and learns sequence features that modulate
 gene expressions. We use LIBSVM (Chang & Lin 2011) for implementing SVC.
 
+
 requires 
 
 * Python >=3
@@ -20,26 +21,30 @@ $ conda env create -f environment.yml
 $ conda activate gkmqc
 ```
 
+
 Please compile C library for gkm-kernel
 ```bash
 $ cd src
 $ make && make install
 ```
 
-Download precalculated null-seq index:\
+
+To prepare null-seq index,
+(1) download precalculated one:\
 [gkmqc.idx.hg38.tar.xz](https://www.dropbox.com/s/wtjylew5ybim29x/gkmqc.idx.hg38.tar.xz?dl=0) (5.8 GB), [gkmqc.idx.mm10.tar.xz](https://www.dropbox.com/s/qye3ts8jep78o3u/gkmqc.idx.mm10.tar.xz?dl=0) (4.5 GB)
 ```bash
 $ cd data
 $ tar xvfJ gkmqc.idx.hg38.tar.xz
 ```
 
-Build your own null-seq index with chromFa.tar.gz file:\
+(2) or build your own null-seq index with chromFa.tar.gz file:\
 [hg38.chromFa.tar.gz](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.chromFa.tar.gz) (938 MB), [mm10.chromFa.tar.gz](https://hgdownload.soe.ucsc.edu/goldenPath/mm10/bigZips/chromFa.tar.gz) (830 MB)
 ```bash
 $ cd data
 # run buildindx command; takes 15 mins with 10 threads
 $ ../bin/gkmqc.py buildidx -i hg38.chromFa.tar.gz -g hg38 -@ [threads]
 ```
+
 
 Evaluate your called peaks and check your gkmQC curve.
 ```bash
@@ -49,6 +54,7 @@ $ ../bin/gkmqc.py evaluate -i foo.narrowPeak -g hg38 -n foo -@ [threads]
 $ cat foo/foo.gkmqc.eval.out
 ```
 
+
 You can check the options with -h arg of gkmqc.py
 ```bash
 $ cd bin
@@ -56,6 +62,7 @@ $ ./gkmqc.py -h
 $ ./gkmqc.py buildidx -h # Building null-seq index
 $ ./gkmqc.py evaluate -h # run gkm-SVM to evaluate peaks
 ```
+
 
 Please cite below papers
 * Han SK, Sampson MG, Lee D. Quality assessment and refinement of non-coding regulatory map using a sequence-based predictive model.
