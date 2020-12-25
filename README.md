@@ -26,14 +26,14 @@ $ cd src
 $ make && make install
 ```
 
-Download precalculated null-seq index:
+Download precalculated null-seq index:\
 [gkmqc.idx.hg38.tar.xz](https://www.dropbox.com/s/wtjylew5ybim29x/gkmqc.idx.hg38.tar.xz?dl=0) (5.8 GB), [gkmqc.idx.mm10.tar.xz](https://www.dropbox.com/s/qye3ts8jep78o3u/gkmqc.idx.mm10.tar.xz?dl=0) (4.5 GB)
 ```bash
 $ cd data
 $ tar xvfJ gkmqc.idx.hg38.tar.xz
 ```
 
-Build your own null-seq index with chromFa.tar.gz file:
+Build your own null-seq index with chromFa.tar.gz file:\
 [hg38.chromFa.tar.gz](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.chromFa.tar.gz) (938 MB), [mm10.chromFa.tar.gz](https://hgdownload.soe.ucsc.edu/goldenPath/mm10/bigZips/chromFa.tar.gz) (830 MB)
 ```bash
 $ cd data
