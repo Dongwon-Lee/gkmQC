@@ -414,7 +414,10 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
         pos_posi_l.append(read_bed_file(pos_bed_file))
 
     # chromosomes
-    chrnames = sorted(pos_posi_l[0].keys())
+    chrnames = set()
+    for pos_posi in pos_posi_l:
+        chrnames.update(set(pos_posi.keys()))
+    chrnames = sorted(list(chrnames))
 
     positive_l = [] # by chr
 
@@ -422,7 +425,7 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
     for chrom in chrnames:
         pos_posi_l_by_chr = []
         for pos_posi_dic in pos_posi_l: 
-            pos_posi_l_by_chr.append(pos_posi_dic[chrom])
+            pos_posi_l_by_chr.append(pos_posi_dic.get(chrom, []))
         args_l.append((pos_posi_l_by_chr, genome, chrom, t, p, fold, gc_margin, rp_margin))
         positive_l.append(pos_posi_l_by_chr)
 
@@ -466,78 +469,3 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
 
     for fo in fo_l:
         fo.close()
-
-''' TODO: construct main routine for standalone-mode
-def main(argv=sys.argv):
-    usage = "usage: %prog [options] <Input File (bed or pos)> <Genome Build Name> <Base Directory of Index Files>"
-
-    desc  = "generate null sequences"
-    parser = optparse.OptionParser(usage=usage, description=desc)
-
-    parser.add_option("-x", dest="fold", type="int", \
-        default = 1, help="number of sequence to sample, FOLD times of given dataset (default=1)")
-
-    parser.add_option("-r", dest="rseed", type="int", \
-        default=1, help="random number seed (default=1)")
-
-    parser.add_option("-g", dest="gc_err", type="float", \
-            default=0.02, help="GC errors allowed (default=0.02)")
-
-    parser.add_option("-t", dest="rpt_err", type="float", \
-            default=0.02, help="RPT errors allowed (default=0.02)")
-
-    parser.add_option("-q", dest="quiet", default=False, action="store_true", \
-                    help="supress messages (default=false)")
-
-    (options, args) = parser.parse_args()
-
-    if len(args) == 0:
-        parser.print_help()
-        sys.exit(0)
-
-    if len(args) != 3:
-        parser.error("incorrect number of arguments")
-        parser.print_help()
-        sys.exit(0)
-
-    random.seed(options.rseed)
-
-    if options.quiet == False:
-            sys.stderr.write('Options:\n')
-            sys.stderr.write('  N fold: ' + str(options.fold) + '\n')
-            sys.stderr.write('  GC error allowed: ' + str(options.gc_err) + '\n')
-            sys.stderr.write('  repeat error allowed: ' + str(options.rpt_err) + '\n')
-            sys.stderr.write('  random seed: ' + str(options.rseed) + '\n')
-            sys.stderr.write('  output: ' + options.output +='\n')
-            sys.stderr.write('\n')
-            sys.stderr.write('Input args:\n')
-            sys.stderr.write('  input file: ' + posfile+ '\n')
-            sys.stderr.write('  genome build name: ' + buildname+ '\n')
-            sys.stderr.write('  basedir: ' + basedir + '\n')
-            sys.stderr.write('\n')
-    else:
-            parser.error(options.input_type + " is not supported")
-            parser.print_help()
-            sys.exit(0)
-'''
-
-#if __name__ == '__main__':
-#    main() 
-    ## TEST CODE
-    #pos_bed_files = list(map(lambda x: "ENCFF607WIZ.e300.qc.top%d.bed" % x, range(1, 15)))
-    #neg_bed_files = list(map(lambda x: "ENCFF607WIZ.e300.qc.top%d.nr1.bed" % x, range(1, 15)))
-    #genome = "hg38"
-    #t = 600
-    #fold = 1
-    #rseed = 1
-    #p = 10
-    #gc_margin = 0.02
-    #rp_margin = 0.02
-    
-    #args_fetch_nb = [
-    #    genome, t, fold, rseed, p,\
-    #    gc_margin, rp_margin
-    #]
-
-    # execute
-    #fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb)

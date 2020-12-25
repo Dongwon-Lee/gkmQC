@@ -19,12 +19,11 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import sys
+import os, sys, time
 import argparse
-import os.path
-import math
 import pickle
 import logging
+import numpy as np
 
 __version__ = '1.0.0'
 
@@ -321,23 +320,6 @@ def main():
         ## fa files
         pos_fa_files = list(map(lambda x: x.replace('.bed', '.fa'), pos_bed_files))
         neg_fa_files = list(map(lambda x: x.replace('.bed', '.fa'), neg_bed_files))
-
-        # retrieve fa
-        #select_seqs_exe = os.path.join(dir_scripts, "seqs_select.py")
-        #for bed in pos_bed_files:
-        #    fa = bed.replace('.bed', '.fa')
-        #    if os.path.isfile(fa):
-        #        continue
-        #    os.system("python %s %s.e%d.qc.fa %s >%s" %\
-        #        (select_seqs_exe, args.name, args.window_bp / 2, bed, fa))
-
-        #genome_fa_dir = os.path.join(dir_data, args.genome_assembly, 'fa')
-        #for bed in neg_bed_files:
-        #    fa = bed.replace('.bed', '.fa')
-        #    if os.path.isfile(fa):
-        #        continue
-        #    os.system("python %s/seqs_fetch.py -d %s %s %s" %\
-        #        (dir_scripts, genome_fa_dir, bed, fa))
     
         ## cross-validate with gkmSVM
         # without job schedular
@@ -371,8 +353,9 @@ def main():
             argc = ' '.join(list(args_vals_pairs))
             print(argc)
             for pos_fa, neg_fa in zip(pos_fa_files, neg_fa_files):
-                os.system("sbatch --export=NONE %s %s -p %s -n %s %s" %\
+                os.system("sbatch --export=NONE python %s %s -p %s -n %s %s" %\
                 (sbatch_exe, gkmsvm_py, pos_fa, neg_fa, argc))
+                time.sleep(0.5)
         else:
             print("no available option for the job schedular")
             sys.exit()

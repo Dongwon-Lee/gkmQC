@@ -26,8 +26,8 @@ import numpy as np
 from sklearn.svm import SVC
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score
-from sklearn.ensemble import GradientBoostingRegressor
 from itertools import repeat
+from multiprocessing import Pool
 
 ##
 # nu-auc regressor
@@ -40,8 +40,6 @@ bin_dir = os.path.join(dir_prnt, "bin")
 #f = open("%s/nu_auc_gb_regressor.pkl" % base_data_dir, "rb")
 #nu_auc_regressor = pickle.load(f)
 #f.close()
-
-
 
 ##
 # Options for GKM Kernel 
@@ -103,100 +101,80 @@ def computeGkmKernel(args_gkm):
 ##
 # cross-validate gkm-SVM models 
 ##
-def crossValidate(args_svm, kmat, n_pseqs, n_nseqs):
-   
-    regularization, precision, shrinking, cache_size, ncv,\
-    repeats, fast_estimation, random_seeds = args_svm
+def _svm_train_proc(args_svm, y, trainIdx, testIdx):
+    regularization, precision, shrinking, cache_size, _,\
+    _, _, _, _ = args_svm
+    y_train, y_test = y[trainIdx], y[testIdx]
+    k_train = kmat[trainIdx, :][:, trainIdx]
+    k_test  = kmat[testIdx, :][:, trainIdx]
+    sv = SVC(
+        kernel="precomputed",
+        C=regularization,
+        tol=precision,
+        shrinking=bool(shrinking),
+        gamma=1.0,
+        cache_size=cache_size
+    )
+    y_score = sv.fit(k_train, y_train).decision_function(k_test)
+    auc = roc_auc_score(y_test, y_score)
+    return auc
+
+def pool_wrapper_svm_train(args):
+    return _svm_train_proc(*args)
+
+def crossValidate(args_svm, _kmat, n_pseqs, n_nseqs):
+
+    global kmat
+    kmat = _kmat
+    _, _, _, _, ncv,\
+    repeats, fast_estimation, random_seeds, p = args_svm
 
     if random_seeds < 0:
         random_seeds = None
-
-    # Answer set
-    #seqids = []
-    #f = open(pos_fa.replace('.fa', '.bed'))
-    #for line in f.readlines():
-    #    seqids.append(line.split()[0])
-    #f.close()
-
-    #f = open(pos_fa.replace('.fa', '.bed'))
-    #for line in f.readlines():
-    #    seqids.append(line.split()[0])
-    #f.close()
     
-    # fast-mode
     seqids = \
         list(map(lambda x: "p%4d" % x, range(n_pseqs))) +\
         list(map(lambda x: "n%4d" % x, range(n_nseqs)))
-    
+ 
     y = np.concatenate((np.repeat(1, n_pseqs), np.repeat(0, n_nseqs)))
+    args_svm = args_svm
 
     # Normal mode: 5-fold cross-validation
     if fast_estimation == 0:
-
-        #mean_aucs = []
-        aucs = []
+        args_l = []
         for _ in range(repeats):
             kf = StratifiedKFold(n_splits=ncv, shuffle=True, random_state=random_seeds)
-            #tprs = []
-            #mean_fpr = np.linspace(0, 1, 100)
-
             for trainIdx, testIdx in kf.split(seqids, y):
-                y_train, y_test = y[trainIdx], y[testIdx]
-                k_train = kmat[trainIdx, :][:, trainIdx]
-                k_test  = kmat[testIdx, :][:, trainIdx]
-                sv = SVC(
-                    kernel="precomputed",
-                    C=regularization,
-                    tol=precision,
-                    shrinking=bool(shrinking),
-                    gamma=1.0,
-                    cache_size=cache_size
-                )
-                y_score = sv.fit(k_train, y_train).decision_function(k_test)
+                args_l.append((args_svm, y, trainIdx, testIdx))
 
-                auc = roc_auc_score(y_test, y_score)
-                aucs.append(auc)
-                # interpolate tpr according to fpr
-                #fpr, tpr, _ = roc_curve(y_test, y_score)
-                #interp_tpr = np.interp(mean_fpr, fpr, tpr)
-                #interp_tpr[0] = 0.0
-                #tprs.append(interp_tpr)
-                #aucs.append(auc(fpr, tpr))
-
-            # calculate mean-AUC
-            #mean_tpr = np.mean(tprs, axis=0)
-            #mean_tpr[-1] = 1.0
-            #mean_auc = auc(mean_fpr, mean_tpr)
-            #mean_aucs.append(mean_auc)
-
-        # repeat
-        #auc_score = np.mean(mean_aucs)
+        pool = Pool(p)
+        aucs = pool.map(pool_wrapper_svm_train, args_l)
         auc_score = np.mean(aucs)
         auc_std = np.std(aucs)
 
     # Fast mode: AUC estimation based on nu values from single training
     # using local regressor
-    else:
-        sv = SVC(
-            kernel="precomputed",
-            C=regularization,
-            tol=precision,
-            shrinking=bool(shrinking),
-            gamma=1.0,
-            cache_size=cache_size
-        )
-        sv.fit(kmat, y) 
+    #else:
+    #    sv = SVC(
+    #        kernel="precomputed",
+    #        C=regularization,
+    #        tol=precision,
+    #        shrinking=bool(shrinking),
+    #        gamma=1.0,
+    #        cache_size=cache_size
+    #    )
+    #    sv.fit(kmat, y) 
         #nu = np.sum(np.abs(sv.dual_coef_[0])) / len(y)
         #auc_score = nu_auc_regressor.predict(np.atleast_2d([nu]).T)[0]
-        #auc_std = np.nan
-
+            #auc_std = np.nan
+    del kmat
     return (auc_score, auc_std)
 
 ##
 # init Function
 ##
 def init(pos_fa, neg_fa, args):
-    
+
     args_gkm = [
         args.kernel_type,
         args.full_word_length, # l
@@ -212,7 +190,7 @@ def init(pos_fa, neg_fa, args):
     ]
 
     kmat, n_pseqs, n_nseqs = computeGkmKernel(args_gkm)
-    
+
     args_svm = [
         args.regularization,
         args.precision,
@@ -222,6 +200,7 @@ def init(pos_fa, neg_fa, args):
         args.repeats,
         args.fast_estimation,
         args.random_seeds,
+        args.n_processes
     ]
     
     auc_score, auc_std = crossValidate(args_svm, kmat, n_pseqs, n_nseqs)
@@ -234,7 +213,8 @@ def init(pos_fa, neg_fa, args):
 
 import argparse
 
-if __name__ == '__main__':
+def main():
+    print("start gkm-SVM as main processor")
 
     desc_txt = "\n".join([
         "lsgkm-pywrapper with fast kernel-mat construction",
@@ -313,3 +293,6 @@ if __name__ == '__main__':
     # args processing codes
     args = parser.parse_args()
     init(args.pos_fa, args.neg_fa, args)
+
+if __name__ == '__main__':
+    main()

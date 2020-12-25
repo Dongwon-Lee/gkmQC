@@ -17,11 +17,10 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import os, subprocess
+import os, random
 from bitarray import bitarray
 import seqs_nullgen
 from seqs_nullgen import bitarray_fromfile
-from subprocess import PIPE
 
 dir_this   = os.path.dirname(os.path.abspath(__file__))
 dir_prnt   = os.path.dirname(dir_this)
@@ -88,29 +87,29 @@ def make_qc_posset(gkmqc_out_dir, args):
     posf0 = "%s.bed" % prefix
     posf0_prof = "%s.prof" % prefix
     posf = "%s.qc.bed" % prefix
-    #posf_fasta = "%s.qc.fa" % prefix
 
     # 1. make fixed length peaks
     print("make fixed length peaks")
     if os.path.isfile(posf0):
         print("skip making %s" % posf0)
-    else:        
+    else:
         os.system("awk -v OFS='\t' -v SHFT=%d '$1 ~ /^chr[0-9XY]+$/ {\
             summit=$2+$10; print $1,summit-SHFT,summit+SHFT,$4,$%d}' %s >%s" %\
-            (ext_len, score_col, peak_file, posf0)) 
+            (ext_len, score_col, peak_file, posf0))
     
     # 2. calculate gc/rp/na profiles of the fixed length peaks
     print("calculate gc/rp/na profiles of the fixed length peaks")
     skip_flag = False
     if os.path.isfile(posf0_prof):
-        nb = int(subprocess.getoutput("cat %s | wc -l" % posf0))
-        np = int(subprocess.getoutput("cat %s | wc -l" % posf0_prof))
+        nb = sum(1 for line in open(posf0))
+        np = sum(1 for line in open(posf0_prof))
         if nb == np:
             print("skip making %s" % posf0_prof)
             skip_flag = True
     if not skip_flag:
         make_profile(posf0, posf0_prof, genome_assembly)
     
+
     print("remove peaks with >1% of N bases & >70% of repeats")
     # 3. remove peaks with >1% of N bases & >70% of repeats
     if os.path.isfile(posf):
@@ -118,21 +117,6 @@ def make_qc_posset(gkmqc_out_dir, args):
     else:
         os.system("paste %s %s | awk '$4<=0.7 && $5<=0.01' |cut -f 6- >%s" %\
             (posf0_prof, posf0, posf))
-    
-    # 4. make fasta file
-    #print("make fasta file")
-    #skip_flag = False
-    #if os.path.isfile(posf_fasta):
-    #    n2 = 2 * int(subprocess.getoutput("cat %s | wc -l" % posf))
-    #    s2 = int(subprocess.getoutput("cat %s | wc -l" % posf_fasta))
-    #    if n2 == s2:
-    #        print("skip making %s" % posf_fasta)
-    #        skip_flag = True
-
-    #if not skip_flag:
-    #    genome_fa_dir = os.path.join(base_data_dir, genome_assembly, 'fa')
-    #    os.system("python %s/seqs_fetch.py -d %s %s %s" %\
-    #        (dir_scripts, genome_fa_dir, posf, posf_fasta))
 
 ##
 # split the positive set by p-value 
@@ -146,33 +130,46 @@ def split_posset(gkmqc_out_dir, args):
     # FILES
     ext_len = window_bp / 2
     prefix = "%s.e%d" % (prefix, ext_len)
-
     posf   = "%s.qc.bed" % prefix
-    ntot   = int(subprocess.getoutput("cat %s | wc -l" % posf))
+
+    # read
+    ntot = 0
+    posf_l = []
+    f = open(posf)
+    for line in f.readlines():
+        ch, s, e, sid, score = line.split()
+        posf_l.append((ch, int(s), int(e), sid, float(score)))
+        ntot += 1
+    f.close()
+
     ntests = int((ntot + int(split_n / 2)) / split_n)
 
     # Sort
     print("sort peaks")
-    os.system("sort -gr -k5,5 %s >%s.tmp.sorted" %\
-        (posf, posf))
+    posf_l.sort(key=lambda x: x[4], reverse=True)
+    posf_lr = []
+    prev_score = posf_l[0][4]
+    prev_argi  = 0
+    for i, posf_e in enumerate(posf_l):
+        if posf_e[4] != prev_score or i == len(posf_l) - 1:
+            sub = posf_l[prev_argi:i]
+            if len(sub) > 1: random.shuffle(sub) # random shuffle peaks with same signal
+            posf_lr += sub
+            prev_score = posf_e[4]
+            prev_argi = i
+    del posf_l
 
     # Split
     print("split processing...")
-    
-    for i in range(1, ntests + 1):
-        skipn = (i - 1) * split_n + 1
-        if i == ntests:
-            sp = subprocess.Popen("tail -n +%d %s.tmp.sorted | sortBed >%s.top%d.bed" %\
-                (skipn, posf, posf[:-4], i), shell=True, stdin=PIPE, stdout=PIPE)
-            sp.communicate()
-        else:
-            sp = subprocess.Popen("tail -n +%d %s.tmp.sorted | head -n %d | sortBed >%s.top%d.bed" %\
-                (skipn, posf, split_n, posf[:-4], i), shell=True, stdin=PIPE, stdout=PIPE)
-            sp.communicate()
-                   
-    # Remove
-    #os.fsync()
-    os.system("rm -f %s.tmp.sorted" % posf)
+    for i in range(ntests):
+        s = split_n * i
+        if i == ntests - 1: e = ntot
+        else: e = split_n * (i + 1)
+        
+        fo = open("%s.top%d.bed" % (posf[:-4], i+1), "w")
+        for line in sorted(posf_lr[s:e]):
+            fo.write('\t'.join(map(str, line)) + '\n')
+        fo.close()
 
     return ntests
 ##
