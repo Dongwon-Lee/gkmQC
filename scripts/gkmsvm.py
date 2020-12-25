@@ -117,7 +117,8 @@ def _svm_train_proc(args_svm, y, trainIdx, testIdx):
     )
     y_score = sv.fit(k_train, y_train).decision_function(k_test)
     auc = roc_auc_score(y_test, y_score)
-    logging.info("1-fold training and validation")
+    nu = np.sum(np.abs(sv.dual_coef_[0])) / len(y_train)
+    logging.info("nu = %.5f, AUC = %.5f", nu, auc)
     return auc
 
 def pool_wrapper_svm_train(args):
@@ -306,5 +307,5 @@ if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout,
         format=logfmt_str, datefmt=datefmt_str,
         level=logging.INFO)
-        
+
     main()
