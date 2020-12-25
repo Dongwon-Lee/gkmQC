@@ -26,7 +26,30 @@ $ cd ./src
 $ make && make install
 ```
 
-You can check how to run with -h option of gkmqc.py
+Download Null-seq index (hg38: 5.8GB)
+```bash
+$ cd ./data
+$ wget https://www.dropbox.com/s/wtjylew5ybim29x/gkmqc.idx.hg38.tar.xz?dl=0
+$ tar xvfJ gkmqc.idx.hg38.tar.xz
+```
+
+Build your own null-seq index
+(takes 15 mins with 10-threads)
+```bash
+$ cd ./data
+# Download zipped fa files split by chromosome
+$ wget https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.chromFa.tar.gz
+$ ../bin/gkmqc.py buildidx -i hg38.chromFa.tar.gz -g hg38 -@ [threads]
+```
+
+Evaluate your called peaks and check your gkmQC curve.
+(takes 1 ~ 2hrs with 10-threads)
+```bash
+$ ../bin/gkmqc.py evaluate -i test.narrowPeak -g hg38 -n test -@ [threads]
+$ cat ./test/test.gkmqc.eval.out
+
+```
+You can check the options with -h arg of gkmqc.py
 ```bash
 $ cd ./bin
 $ ./gkmqc.py -h

@@ -57,10 +57,10 @@ def per_chrom_idx_bits(fn, prefix_dir, chr):
         os.rename(fn, fa_fn)
     try:
         # Open chromosome fa
-        logging.info("read fa file: ", chr)
+        logging.info("read fa file: %s", chr)
         f = open(fa_fn, "r")
     except IOError as err:
-        logging.error("I/O error: ", err)
+        logging.error("I/O error: %s", err)
         sys.exit(0)
     
     seq = ''.join(f.readlines()[1:]).strip()
@@ -244,7 +244,7 @@ def read_bed_file(fn):
         lines = f.readlines()
         f.close()
     except IOError as err:
-        logging.error("I/O error: ", err)
+        logging.error("I/O error: %s", err)
         sys.exit(0)
     
     posi_dic = {}
@@ -283,7 +283,7 @@ def _per_chrom_sample_nullseq_idx(pos_posi_l, genome, chrom, t, p, fold, gc_marg
         nidx_pos = np.memmap(nidx_pos_fn, dtype="int32", mode="r", shape=(n,))
 
     except IOError as err:
-        logging.error("I/O error: ", err)
+        logging.error("I/O error: %s", err)
         sys.exit(0)
 
     sampled_posi_l = []
