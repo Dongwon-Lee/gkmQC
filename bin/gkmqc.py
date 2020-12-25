@@ -279,13 +279,13 @@ def main():
     import seqs_nullgen
 
     if args.commands == "buildidx":
-        logging.info("### build null seq index")
+        logging.info("build null seq index")
         args_nidx = [args.chrom_file, args.genome_assembly, args.window_bp, args.n_processes]
         seqs_nullgen.build_nullseq_index(args_nidx)
 
     if args.commands == "evaluate":
-        logging.info("### executing evaluate pipeline")
-        print("## allocate output directory and make it if no exist.")
+        logging.info("executing evaluate pipeline")
+        logging.info("make output directory if no exist")
         gkmqc_out_dir = os.path.join(os.path.dirname(args.peak_file), args.name + ".gkmqc")
 
         if not os.path.isdir(gkmqc_out_dir):
@@ -301,20 +301,20 @@ def main():
         # preprocess peaks
         import preprocess
 
-        print("## QC and make a positive set")
+        logging.info("QC and make a positive set")
         preprocess.make_qc_posset(gkmqc_out_dir, args)
 
-        print("## split the positive set by p-value")
+        logging.info("split the positive set by p-value")
         ntests = preprocess.split_posset(gkmqc_out_dir, args)
 
         if args.rank_start > ntests:
-            print("error: invalid range of ranks")
+            logging.error("error: invalid range of ranks")
             sys.exit()
         
         if args.rank_end > ntests:
             args.rank_end = ntests
 
-        print("## generate negative sets")
+        logging.info("generate negative sets")
         pos_bed_files, neg_bed_files = preprocess.make_negset(gkmqc_out_dir, args)
 
         ## fa files
@@ -323,9 +323,9 @@ def main():
     
         ## cross-validate with gkmSVM
         # without job schedular
-        print("## cross-validation with gkm-SVM:", end=' ')
+        logging.info("cross-validation with gkm-SVM")
         if args.gkmsvm_mpi == 'none':
-            print("no job schedular mode")
+            logging.info("job schedular: none")
             import gkmsvm
             for pos_fa, neg_fa in zip(pos_fa_files, neg_fa_files):
                 print("cv: %s vs %s" % (pos_fa, neg_fa))
@@ -333,7 +333,7 @@ def main():
 
         # job schedular: slurm
         elif args.gkmsvm_mpi == 'slurm':
-            print("slurm")
+            logging.info("job schedular: slurm")
             sbatch_exe = os.path.join(dir_scripts, "gkmsvm_slurm.sh")
             gkmsvm_py  = os.path.join(dir_scripts, "gkmsvm.py")
             gkmsvm_args = [
@@ -357,7 +357,7 @@ def main():
                 (args.n_processes, sbatch_exe, gkmsvm_py, pos_fa, neg_fa, argc))
                 time.sleep(0.5)
         else:
-            print("no available option for the job schedular")
+            logging.error("no available option for the job schedular")
             sys.exit()
         
         # return dir
@@ -365,8 +365,8 @@ def main():
 
     if args.commands == "optimize":
         # TODO: to be implemented
-        logging.info("### score sequences using the trained model")
-        print("TODO: under implementing")
+        logging.info("score sequences using the trained model")
+        logging.info("TODO: under implementing")
 
 if __name__=='__main__':
     main()

@@ -21,6 +21,7 @@ import os, random
 from bitarray import bitarray
 import seqs_nullgen
 from seqs_nullgen import bitarray_fromfile
+import logging
 
 dir_this   = os.path.dirname(os.path.abspath(__file__))
 dir_prnt   = os.path.dirname(dir_this)
@@ -89,31 +90,31 @@ def make_qc_posset(gkmqc_out_dir, args):
     posf = "%s.qc.bed" % prefix
 
     # 1. make fixed length peaks
-    print("make fixed length peaks")
+    logging.info("make fixed length peaks")
     if os.path.isfile(posf0):
-        print("skip making %s" % posf0)
+        logging.info("skip making %s", posf0)
     else:
         os.system("awk -v OFS='\t' -v SHFT=%d '$1 ~ /^chr[0-9XY]+$/ {\
             summit=$2+$10; print $1,summit-SHFT,summit+SHFT,$4,$%d}' %s >%s" %\
             (ext_len, score_col, peak_file, posf0))
     
     # 2. calculate gc/rp/na profiles of the fixed length peaks
-    print("calculate gc/rp/na profiles of the fixed length peaks")
+    logging.info("calculate gc/rp/na profiles of the fixed length peaks")
     skip_flag = False
     if os.path.isfile(posf0_prof):
         nb = sum(1 for line in open(posf0))
         np = sum(1 for line in open(posf0_prof))
         if nb == np:
-            print("skip making %s" % posf0_prof)
+            logging.info("skip making %s", posf0_prof)
             skip_flag = True
     if not skip_flag:
         make_profile(posf0, posf0_prof, genome_assembly)
     
 
-    print("remove peaks with >1% of N bases & >70% of repeats")
+    logging.info("remove peaks with >1% of N bases & >70% of repeats")
     # 3. remove peaks with >1% of N bases & >70% of repeats
     if os.path.isfile(posf):
-        print("skip making %s" % posf)
+        logging.info("skip making %s", posf)
     else:
         os.system("paste %s %s | awk '$4<=0.7 && $5<=0.01' |cut -f 6- >%s" %\
             (posf0_prof, posf0, posf))
@@ -145,7 +146,7 @@ def split_posset(gkmqc_out_dir, args):
     ntests = int((ntot + int(split_n / 2)) / split_n)
 
     # Sort
-    print("sort peaks")
+    logging.info("sort peaks")
     posf_l.sort(key=lambda x: x[4], reverse=True)
     posf_lr = []
     prev_score = posf_l[0][4]
@@ -160,7 +161,7 @@ def split_posset(gkmqc_out_dir, args):
     del posf_l
 
     # Split
-    print("split processing...")
+    logging.info("split processing")
     for i in range(ntests):
         s = split_n * i
         if i == ntests - 1: e = ntot
@@ -198,7 +199,7 @@ def make_negset(gkmqc_out_dir, args):
     neg_exist_l = len([f for f in neg_bed_files if os.path.isfile(f)])
 
     if pos_exist_l == neg_exist_l:
-        print("skip making negative set")
+        logging.info("skip making negative set")
     else:
         # generate null seq
         args_nseq_gen = [genome, window_bp, rseed, p, gc_margin, rp_margin]

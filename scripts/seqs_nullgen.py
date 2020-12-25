@@ -29,6 +29,7 @@ from pyfasta import Fasta
 import numpy as np
 from multiprocessing import Pool
 from collections.abc import Iterable
+import logging
 
 dir_this   = os.path.dirname(os.path.abspath(__file__))
 dir_prnt   = os.path.dirname(dir_this)
@@ -43,7 +44,7 @@ def bitarray_fromfile(fn):
         bits = bitarray()
         bits.fromfile(fh)
     except IOError as err:
-        print("I/O error: ", err)
+        logging.error("I/O error: %s", err)
         sys.exit(0)
     return bits, fh
 
@@ -52,14 +53,14 @@ def per_chrom_idx_bits(fn, prefix_dir, chr):
     # check preexisting file
     fa_fn = os.path.join(prefix_dir, 'fa', os.path.basename(fn))
     if not os.path.isfile(fa_fn):
-        print("move fa to idx dir: ", fa_fn)
+        logging.info("move fa to idx dir: %s", fa_fn)
         os.rename(fn, fa_fn)
     try:
         # Open chromosome fa
-        print("read fa file: ", chr)
+        logging.info("read fa file: ", chr)
         f = open(fa_fn, "r")
     except IOError as err:
-        print("I/O error: ", err)
+        logging.error("I/O error: ", err)
         sys.exit(0)
     
     seq = ''.join(f.readlines()[1:]).strip()
@@ -74,7 +75,7 @@ def per_chrom_idx_bits(fn, prefix_dir, chr):
     for wchar, bn in zip(wchar_l, barr_n):
         bit_fn  = os.path.join(prefix_dir, 'bit/%s.%s.bit' % (chr, bn))
         if not os.path.isfile(bit_fn):
-            print("no wchar bit array for %s: making wcard bit index.." % chr)
+            logging.info("no wchar bit array for %s: making wcard bit index..", chr)
             arr = bitarray(map(lambda c: c in wchar, seq))
 
             # save bit file
@@ -82,7 +83,7 @@ def per_chrom_idx_bits(fn, prefix_dir, chr):
             arr.tofile(fo)
             fo.close()
         else:
-            print("wchar bit array for %s already exists. loading .." % chr)
+            logging.info("wchar bit array for %s already exists. loading ..", chr)
             arr, f = bitarray_fromfile(bit_fn)
             f.close()
         arr_list.append(arr)
@@ -121,7 +122,7 @@ def per_chrom_nidx_l(fn, prefix_dir, chr, t, arr_list):
         cg_cnt_c = cg_arr[:t].count(True)
         rp_cnt_c = rp_arr[:t].count(True)
 
-        print("making nulls index for %s" % fn)
+        logging.info("making nulls index for %s", fn)
         for i in range(0, len(na_arr) - t):
             # indexing only for regions with N-count = 0
             if not na_cnt_c:
@@ -150,7 +151,7 @@ def per_chrom_nidx_l(fn, prefix_dir, chr, t, arr_list):
         del nidx_pos_fn
 
     else:
-        print("already have nidx_pos/ptr matrices for %s, skip." % fn)
+        logging.info("already have nidx_pos/ptr matrices for %s, skip.", fn)
 
 ##
 # process function
@@ -194,13 +195,13 @@ def build_nullseq_index(args_nidx):
         os.mkdir(barr_dir)
     
     args_l = []
-    print("extract genome fa files...: %s" % chrom_file)
+    logging.info("extract genome fa files...: %s", chrom_file)
     if zipfile.is_zipfile(chrom_file):
         zipfileobj = zipfile.ZipFile(chrom_file)
         for fn in zipfileobj.namelist():
             fn_dest = os.path.join(fseq_dir, os.path.basename(fn))
             if not os.path.isfile(fn_dest): # check preexisting fa file
-                print("no file in idx dir: extracting file : ", fn) 
+                logging.info("no file in idx dir: extracting file : %s", fn) 
                 zipfileobj.extract(fn)
             args_l.append((fn, t, prefix_dir))
         zipfileobj.close()
@@ -212,7 +213,7 @@ def build_nullseq_index(args_nidx):
                 fn = tarinfo.name
                 fn_dest = os.path.join(fseq_dir, os.path.basename(fn))
                 if not os.path.isfile(fn_dest): # check preexisting fa file
-                    print("no file in idx dir: extracting file : ", fn) 
+                    logging.info("no file in idx dir: extracting file : %s", fn) 
                     tarfileobj.extract(fn)
                 args_l.append((fn, t, prefix_dir))
         tarfileobj.close()
@@ -222,7 +223,7 @@ def build_nullseq_index(args_nidx):
     #    q_tasks.put((fn, t, prefix_dir)))
     #    fp.close()
     else:
-        print("error: needs .zip or .tar.gz file")
+        logging.error("error: needs .zip or .tar.gz file")
         return 1
     
     # multiprocessing
@@ -243,7 +244,7 @@ def read_bed_file(fn):
         lines = f.readlines()
         f.close()
     except IOError as err:
-        print("I/O error: ", err)
+        logging.error("I/O error: ", err)
         sys.exit(0)
     
     posi_dic = {}
@@ -282,7 +283,7 @@ def _per_chrom_sample_nullseq_idx(pos_posi_l, genome, chrom, t, p, fold, gc_marg
         nidx_pos = np.memmap(nidx_pos_fn, dtype="int32", mode="r", shape=(n,))
 
     except IOError as err:
-        print("I/O error: ", err)
+        logging.error("I/O error: ", err)
         sys.exit(0)
 
     sampled_posi_l = []
@@ -378,7 +379,7 @@ def _per_chrom_sample_nullseq_idx(pos_posi_l, genome, chrom, t, p, fold, gc_marg
         del nidx_l_incr_ptr
 
         sampled_posi_l.append((i, sampled_posi))
-        print("%s: finished %d-set!" % (chrom, i))
+        logging.info("%s: finished %d-set!", chrom, i)
     
     del gc_arr, rp_arr, na_arr
     del nidx_ptr, nidx_pos
@@ -447,12 +448,12 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
     for fo in fo_l:
         fo.close()
     
-    print("fetch fasta seq...")
+    logging.info("fetch fasta seq")
     # write fa files (pos, neg)
     fa_files = list(map(lambda x: x.replace('.bed', '.fa'), pos_bed_files + neg_bed_files))
     fo_l = list(map(lambda x: open(x, "w"), fa_files))
     for pos_posi_l, (chrom, neg_posi_l) in zip(positive_l, results_l):
-        print(chrom)
+        logging.info(chrom)
         # load fasta object
         chr_fa = os.path.join(base_data_dir, '%s/fa/%s.fa' % (genome, chrom))
         f = Fasta(chr_fa)[chrom]

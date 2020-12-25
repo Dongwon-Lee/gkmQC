@@ -88,7 +88,7 @@ def computeGkmKernel(args_gkm):
     ret = _gkmkern_pylib.gkm_main_pywrapper(opts, kmat_p, narr_p)
 
     if ret:
-        print("error on kernel construction")
+        logging.error("error on kernel construction")
         sys.exit()
 
     n_pseqs, n_nseqs = narr
@@ -117,6 +117,7 @@ def _svm_train_proc(args_svm, y, trainIdx, testIdx):
     )
     y_score = sv.fit(k_train, y_train).decision_function(k_test)
     auc = roc_auc_score(y_test, y_score)
+    logging.info("1-fold training and validation")
     return auc
 
 def pool_wrapper_svm_train(args):
@@ -189,6 +190,7 @@ def init(pos_fa, neg_fa, args):
         args.verbosity
     ]
 
+    logging.info("%s: building up kernel matrix", pos_fa)
     kmat, n_pseqs, n_nseqs = computeGkmKernel(args_gkm)
 
     args_svm = [
@@ -203,9 +205,11 @@ def init(pos_fa, neg_fa, args):
         args.n_processes
     ]
     
+    logging.info("%s: svm training", pos_fa)
     auc_score, auc_std = crossValidate(args_svm, kmat, n_pseqs, n_nseqs)
     
     # write results to out file
+    logging.info("%s: writing result to output file", pos_fa)
     eval_out_file = args.name + ".gkmqc.eval.out"
     fa = open(eval_out_file, "a")
     fa.write('\t'.join(map(str, [pos_fa, neg_fa, n_pseqs, auc_score, auc_std])) + "\n")
@@ -295,4 +299,12 @@ def main():
     init(args.pos_fa, args.neg_fa, args)
 
 if __name__ == '__main__':
+    # formatting compatible with clog
+    logfmt_str = '%(levelname)s %(asctime)s: %(message)s'
+    datefmt_str = '%Y-%m-%d %H:%M:%S'
+
+    logging.basicConfig(stream=sys.stdout,
+        format=logfmt_str, datefmt=datefmt_str,
+        level=logging.INFO)
+        
     main()
