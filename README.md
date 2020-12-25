@@ -8,12 +8,19 @@ gene expressions. We use LIBSVM (Chang & Lin 2011) for implementing SVR.
 
 requires 
 
-* Python >=3.x
-* sklearn
+* Python >=3
 * numpy
+* sklearn
+* bitarray
 * pyfasta
 
-Please compile C++ library for building gkm-kernel matrix
+Set conda virtual environment
+```bash
+$ conda env create -f environment.yml
+$ conda activate gkmqc
+```
+
+Please compile C library for gkm-kernel
 ```bash
 $ cd ./src
 $ make && make install
