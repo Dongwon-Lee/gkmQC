@@ -46,7 +46,7 @@ Evaluate your called peaks and check your gkmQC curve.
 # run evaluate command; takes 1 ~ 2 hrs with 10 threads
 $ cd test
 $ ../bin/gkmqc.py evaluate -i foo.narrowPeak -g hg38 -n foo -@ [threads]
-$ cat test/foo.gkmqc.eval.out
+$ cat foo/foo.gkmqc.eval.out
 ```
 
 You can check the options with -h arg of gkmqc.py
