@@ -29,7 +29,7 @@ $ make && make install
 ```
 
 
-To prepare null-seq index,
+To prepare null-seq index,\
 (1) download precalculated one:\
 [gkmqc.idx.hg38.tar.xz](https://www.dropbox.com/s/wtjylew5ybim29x/gkmqc.idx.hg38.tar.xz?dl=0) (5.8 GB), [gkmqc.idx.mm10.tar.xz](https://www.dropbox.com/s/qye3ts8jep78o3u/gkmqc.idx.mm10.tar.xz?dl=0) (4.5 GB)
 ```bash
