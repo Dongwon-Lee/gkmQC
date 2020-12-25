@@ -214,7 +214,7 @@ def init(pos_fa, neg_fa, args):
 import argparse
 
 def main():
-    print("start gkm-SVM as main processor")
+    #print("start gkm-SVM as main processor")
 
     desc_txt = "\n".join([
         "lsgkm-pywrapper with fast kernel-mat construction",

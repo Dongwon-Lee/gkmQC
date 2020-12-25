@@ -353,7 +353,7 @@ def main():
             argc = ' '.join(list(args_vals_pairs))
             print(argc)
             for pos_fa, neg_fa in zip(pos_fa_files, neg_fa_files):
-                os.system("sbatch --export=NONE python %s %s -p %s -n %s %s" %\
+                os.system("sbatch %s %s -p %s -n %s %s" %\
                 (sbatch_exe, gkmsvm_py, pos_fa, neg_fa, argc))
                 time.sleep(0.5)
         else:
