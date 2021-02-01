@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
     nullseq.py: fast sampling of positive and negative sequence
     of open-chromain peaks
@@ -470,3 +471,56 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
 
     for fo in fo_l:
         fo.close()
+
+import argparse
+
+def main():
+    desc_txt = "\n".join([
+        "fast random sequence generator",
+        "using pyfasta, memory mapping technique",
+        "-- Seong Kyu Han (seongkyu.han@childrens.harvard.edu),",
+        "-- Dongwon Lee (dongwon.lee@childrens.harvard.edu)"
+    ])
+
+    parser = argparse.ArgumentParser(description=desc_txt,
+        formatter_class=argparse.RawTextHelpFormatter)
+
+    parser.add_argument("-p", "--pos-bed", type=str, required=True,
+        help="positive bed file. REQUIRED")
+    parser.add_argument("-n", "--neg-bed", type=str, required=True,
+        help="negative bed file. REQUIRED")
+    parser.add_argument("-g", "--genome-assembly", type=str, required=True,
+        help="name of genome index; e.g. hg38")
+    parser.add_argument("-t", "--interval", type=int, default=600,
+        help="size of scanning window\n(default: 600bp)")
+    parser.add_argument("-s", "--random-seeds", type=int, default=-1,
+        help="random seed number\nfor reproducibility\n(default: no seed)")
+    parser.add_argument("-mg", "--marginal-gc", type=float, default=0.02,
+        help="GC errors allowed in generating null-seq\n(default=0.02)")
+    parser.add_argument("-mr", "--marginal-rp", type=float, default=0.02,
+        help="Repeat errors allowed in generating null-seq\n(default=0.02)")
+    parser.add_argument("-@", "--n-processes", type=int, default=1,
+        help="number of processes\n(default: 1)")
+
+    # args processing codes
+    args = parser.parse_args()
+    args_fetch_nb = [
+        args.genome_assembly,
+        args.interval,
+        args.random_seeds,
+        args.n_processes,
+        args.marginal_gc,
+        args.marginal_rp
+    ]
+    fetch_nullseq_beds([args.pos_bed], [args.neg_bed], args_fetch_nb)
+
+if __name__ == '__main__':
+    # formatting compatible with clog
+    logfmt_str = '%(levelname)s %(asctime)s: %(message)s'
+    datefmt_str = '%Y-%m-%d %H:%M:%S'
+
+    logging.basicConfig(stream=sys.stdout,
+        format=logfmt_str, datefmt=datefmt_str,
+        level=logging.INFO)
+
+    main()

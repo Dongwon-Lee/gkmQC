@@ -204,7 +204,7 @@ def main():
         group_svm.add_argument("-x", "--ncv", type=int, default=5,
             help="x-fold cross validation\nfor estimating effects of tags in training set\n(default: 5)")
         group_svm.add_argument("-r", "--repeats", type=int, default=10,
-            help="number of repeats of CV training\nto reduce random variation\n(default: 1)")
+            help="number of repeats of CV training\nto reduce random variation\n(default: 10)")
         group_svm.add_argument("-f", "--fast-estimation", type=int, default=0,
             help="fast estimation of AUC without nCV:\nusing nu score from trained SVM\n(default: 0)")
         

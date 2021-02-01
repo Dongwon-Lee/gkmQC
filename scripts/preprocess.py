@@ -94,7 +94,7 @@ def make_qc_posset(gkmqc_out_dir, args):
     if os.path.isfile(posf0):
         logging.info("skip making %s", posf0)
     else:
-        os.system("awk -v OFS='\t' -v SHFT=%d '$1 ~ /^chr[0-9XY]+$/ {\
+        os.system("awk -v OFS='\t' -v SHFT=%d '$1 ~ /^chr[0-9XY]+$/ && $2+$10 > SHFT {\
             summit=$2+$10; print $1,summit-SHFT,summit+SHFT,$4,$%d}' %s >%s" %\
             (ext_len, score_col, peak_file, posf0))
     
