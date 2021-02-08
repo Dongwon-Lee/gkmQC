@@ -51,7 +51,16 @@ Evaluate your called peaks and check your gkmQC curve.
 # run evaluate command; takes 1 ~ 2 hrs with 10 threads
 $ cd test
 $ ../bin/gkmqc.py evaluate -i foo.narrowPeak -g hg38 -n foo -@ [threads]
-$ cat foo/foo.gkmqc.eval.out
+$ cat foo.gkmqc/foo.gkmqc.eval.out
+```
+
+Optimize your called peaks with gkmQC AUC scores.
+```bash
+# run optimize command; requires gkmQC results of called peaks with original and relaxed cut-off
+# foo, foo_rc: prefixs of gkmQC result with peaks from either original, relaxed cut-off
+$ cd test
+$ ../bin/gkmqc.py optimize -p1 foo -p2 foo_rc
+$ cat foo.gkmqc/foo.e300.optz.bed
 ```
 
 
