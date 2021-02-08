@@ -56,13 +56,13 @@ $ cat foo.gkmqc/foo.gkmqc.eval.out
 
 Optimize your called peaks with gkmQC AUC scores.
 ```bash
-# run optimize command; requires gkmQC results of called peaks with original and relaxed cut-off
+# run optimize command;
+# requires gkmQC results of called peaks with original and relaxed cut-off
 # foo, foo_rc: prefixs of gkmQC result with peaks from either original, relaxed cut-off
 $ cd test
 $ ../bin/gkmqc.py optimize -p1 foo -p2 foo_rc
 $ cat foo.gkmqc/foo.e300.optz.bed
 ```
-
 
 You can check the options with -h arg of gkmqc.py
 ```bash
@@ -70,6 +70,7 @@ $ cd bin
 $ ./gkmqc.py -h
 $ ./gkmqc.py buildidx -h # Building null-seq index
 $ ./gkmqc.py evaluate -h # run gkm-SVM to evaluate peaks
+$ ./gkmqc.py optimize -h # run gkmQC to optimize peaks
 ```
 
 
