@@ -1,12 +1,22 @@
-import os
+import os, glob
 import numpy as np
 import subprocess
+import logging
 
-def optimize_peaks(prefix, base_dir, rc_suffix="_rc", t=600):
+def optimize_peaks(args):
+
+    prefix = args.gkmqc_prefix
+    prefix_rc = args.gkmqc_rt_prefix
+    base_dir = args.base_dir
+
+    # inference ext-num
+    file_prof = glob.glob("%s/%s.gkmqc/%s.e*.prof" % (base_dir, prefix, prefix))[0]
+    ext = int(file_prof.split('.')[-2][1:])
+
     # files
-    out_file = os.path.join(base_dir, "%s.gkmqc/%s.e%d.optz.bed" % (prefix, prefix, t/2))
+    out_file = os.path.join(base_dir, "%s.gkmqc/%s.e%d.optz.bed" % (prefix, prefix, ext))
     file_gqc = os.path.join(base_dir, "%s.gkmqc/%s.gkmqc.eval.out" % (prefix, prefix))
-    file_bed = os.path.join(base_dir, "%s.gkmqc/%s.e%d.bed" % (prefix, prefix, t/2))
+    file_bed = os.path.join(base_dir, "%s.gkmqc/%s.e%d.bed" % (prefix, prefix, ext))
     
     # check last AUC
     f = open(file_gqc)
@@ -15,21 +25,34 @@ def optimize_peaks(prefix, base_dir, rc_suffix="_rc", t=600):
     
     # if least AUC >0.75, then start optimization
     n_ori_flag = False
-    if l_auc > 0.75:
-        prefix += rc_suffix
+    if l_auc > args.auc_start_opt:
+        logging.info("least AUC = %.3f > %.2f: start optimizing peaks from relaxed threshold",\
+            l_auc, args.auc_start_opt)
+        prefix = prefix_rc
         file_gqc = os.path.join(base_dir, "%s.gkmqc/%s.gkmqc.eval.out" % (prefix, prefix))
-        file_bed = os.path.join(base_dir, "%s.gkmqc/%s.e%d.bed" % (prefix, prefix, t/2))
+        file_bed = os.path.join(base_dir, "%s.gkmqc/%s.e%d.bed" % (prefix, prefix, ext))
         f = open(file_gqc)
         l_auc_opt = min(map(lambda x: float(x.split()[3]), f.readlines()))
         f.close()
         
         # if least AUC >0.7, then use optimized peak-calling file
-        if l_auc_opt > 0.7:
+        if l_auc_opt > args.auc_min_coff:
+            logging.info("%.2f < least AUC from recalled peaks = %.3f < %.2f: use all peaks from relaxed threshold",\
+                args.auc_min_coff, l_auc_opt, args.auc_start_opt)
             n_ori_flag = True
+        else:
+            logging.info("least AUC from recalled peaks = %.3f < %.2f: filtering peaks with gkmQC AUC",\
+                l_auc_opt, args.auc_min_coff)
     
     # 0.7 < AUC < 0.75: use original peak-calling
-    elif l_auc > 0.7:
+    elif l_auc > args.auc_min_coff:
+        logging.info("%.2f < least AUC = %.3f < %.2f: use all original peaks",\
+            args.auc_min_coff, l_auc, args.auc_start_opt)
         n_ori_flag = True
+    
+    else:
+        logging.info("least AUC = %.3f < %.2f: filtering peaks with gkmQC AUC",\
+            l_auc, args.auc_min_coff)
     
     if n_ori_flag:
         f = open(file_bed)
@@ -42,16 +65,15 @@ def optimize_peaks(prefix, base_dir, rc_suffix="_rc", t=600):
                 i += 1
         fo.close()
         f.close()
-        return i
 
     else:
         f = open(file_gqc)
-        ex_rank = 100
+        ex_rank = np.inf
         i = 0
         for line in f.readlines():
             pf, _, _, auc_score, _ = line.split()
             rank = int(pf.split('.')[-2][3:])
-            if float(auc_score) < 0.7 and rank < ex_rank:
+            if float(auc_score) < args.auc_min_coff and rank < ex_rank:
                 ex_rank = rank
             i += 1
         f.close()
@@ -59,7 +81,7 @@ def optimize_peaks(prefix, base_dir, rc_suffix="_rc", t=600):
         
         # save file
         # get least score
-        file_eps = os.path.join(base_dir, "%s.gkmqc/%s.e%d.qc.top%d.bed" % (prefix, prefix, t/2, ex_rank))
+        file_eps = os.path.join(base_dir, "%s.gkmqc/%s.e%d.qc.top%d.bed" % (prefix, prefix, ext, ex_rank))
         l_sig_val = np.inf
         f = open(file_eps)
         for line in f.readlines():
@@ -79,4 +101,7 @@ def optimize_peaks(prefix, base_dir, rc_suffix="_rc", t=600):
                 i += 1
         fo.close()
         f.close()
-        return i
+    
+    logging.info("Done. Total optimized peaks = %d", i)
+    logging.info("Optimized peaks have been saved to:")
+    logging.info("%s", out_file)

@@ -117,25 +117,22 @@ def main():
 
     # parser for the "optimize" command
     group_req_optz = subparser_optz.add_argument_group('required arguments')
-    group_req_optz.add_argument("-i", "--gkmqc-file", type=str, required=True,
-        help="peak-calling file or gkmQC AUC output file.")
-    group_req_optz.add_argument("-n", "--name", type=str, required=True,
-        help="name of output prefix.")
-    group_req_optz.add_argument("-b", "--bam-file", type=str, required=True,
-        help="processed bam file for peak-calling.")
-    group_req_optz.add_argument("-g", "--genome-assembly", type=str, required=True,
-        help="prefix used in 'buildidx' command for genome-indexing.")
-    subparser_optz.add_argument("-ce", "--caller-executable", type=str, required=True,
-        help="path of peak caller executable, e.g., /usr/bin/macs2")
-    subparser_optz.add_argument("-cf", "--caller-flags", type=str, required=True,
-        help="flags of peak caller")
+    group_req_optz.add_argument("-p1", "--gkmqc-prefix", type=str, required=True,
+        help="prefix name of gkmQC results for default peak-calling file")
+    group_req_optz.add_argument("-p2", "--gkmqc-rt-prefix", type=str, required=True,
+        help="prefix name of gkmQC results for relaxed-thresholded peak-calling file")
 
     group_opt_optz = subparser_optz.add_argument_group('optional arguments\nbase')
-    group_opt_optz.add_argument("-U", "--auc-coff", type=float, default=0.7,
-        help="threshold of AUC to optimize the peaks\n(default: 0.7)")
+    group_opt_optz.add_argument("-b", "--base-dir", type=str, default='.',
+        help="base dir including gkmqc profiles\n(default: .)")
+    group_opt_optz.add_argument("-a1", "--auc-start-opt", type=float, default=0.75,
+        help="Minimum of last AUC for optimization\n(default: 0.75)")
+    group_opt_optz.add_argument("-a2", "--auc-min-coff", type=float, default=0.7,
+        help="threshold of minimum AUC to sort out optimized peaks\n(default: 0.7)")
 
     # parser for common (evalute, optimize)
-    for subparser_comm, group_opt in [(subparser_eval, group_opt_eval), (subparser_optz, group_opt_optz)]:
+    #for subparser_comm, group_opt in [(subparser_eval, group_opt_eval), (subparser_optz, group_opt_optz)]:
+    for subparser_comm, group_opt in [(subparser_eval, group_opt_eval)]:
 
         # optional arguments 
         group_opt.add_argument("-l", "--split-n", type=int, default=5000,
@@ -235,15 +232,14 @@ def main():
         HEADER += "\n#   RANK_END={0}".format(args.rank_end)
 
     if args.commands == "optimize":
-        HEADER += "\n#   GKMQC_FILE={0}".format(args.gkmqc_file)
-        HEADER += "\n#   EXP_NAME={0}".format(args.name)
-        HEADER += "\n#   BAM_FILE={0}".format(args.bam_file)
-        HEADER += "\n#   GENOME_ASSEMBLY={0}".format(args.genome_assembly)
-        HEADER += "\n#   CALLER_EXECUTABLE={0}".format(args.caller_executable)
-        HEADER += "\n#   CALLER_FLAGS={0}".format(args.caller_flags)
-        HEADER += "\n#   AUC_CUTOFF={0}".format(args.auc_coff)
+        HEADER += "\n#   GKMQC_PREFIX={0}".format(args.gkmqc_prefix)
+        HEADER += "\n#   GKMQC_RT_PREFIX={0}".format(args.gkmqc_rt_prefix)
+        HEADER += "\n#   AUC_START_OPT={0}".format(args.auc_start_opt)
+        HEADER += "\n#   AUC_MIN_COFF={0}".format(args.auc_min_coff)        
+
     
-    if args.commands == "evaluate" or args.commands == "optimize":
+    #if args.commands == "evaluate" or args.commands == "optimize":
+    if args.commands == "evaluate":
         # base
         HEADER += "\n#   N_PEAKS_PER_SUBSET={0}".format(args.split_n)
         HEADER += "\n#   SCORE_COL={0}".format(args.score_col)
@@ -364,9 +360,9 @@ def main():
         os.chdir(curdir)
 
     if args.commands == "optimize":
-        # TODO: to be implemented
-        logging.info("score sequences using the trained model")
-        logging.info("TODO: under implementing")
+        import optimize
+        logging.info("optimize peaks with gkmQC-AUC profile")
+        optimize.optimize_peaks(args)
 
 if __name__=='__main__':
     main()
