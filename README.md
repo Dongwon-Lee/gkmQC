@@ -6,8 +6,6 @@
 
 gkmQC is a sequence-based quality assessment and refinement of
 chromatin accessibility data using gkm-SVM.
-Especially, gkmQC enables us to optimize open-chromatin peaks
-for rare cell-types in single-cell ATAC-seq data.
 It trains a support vector classifier (SVC) using gapped-kmer kernels
 (Ghandi et al., 2014; Lee, 2016), and learns sequence features that modulate
 gene expressions. We use LIBSVM (Chang & Lin 2011) for implementing SVC.
@@ -59,6 +57,19 @@ $ cd test
 $ ../bin/gkmqc.py evaluate -i foo.narrowPeak -g hg38 -n foo -@ [threads]
 $ cat foo.gkmqc/foo.gkmqc.eval.out
 ```
+
+Especially, gkmQC enables us to optimize open-chromatin peaks
+for rare cell-types in single-cell ATAC-seq data.
+
+<p align="center">
+<img src="./gkmQC_optz_rev.png" width="675" height="348" />
+</p>
+
+Based on the gkmQC-AUC of peak subsets
+called from original and relaxed threshold of MACS2,
+gkmQC optimizes the threshold of peak-calling.
+Consequently, gkmQC recovers uncalled peaks
+due to the insufficient reads for rare-cells.
 
 Optimize your called peaks with gkmQC AUC scores.
 ```bash
