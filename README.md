@@ -1,7 +1,11 @@
-## gkmQC: gapped k-mer-SVM quality check
+## gkmQC: gapped k-mer-SVM quality check and optimization
+
+<img src="./gkmQC_concept.png" width="830" height="1020" /> 
 
 gkmQC is a sequence-based quality assessment and refinement of
 chromatin accessibility data using gkm-SVM.
+Especially, gkmQC enables us to optimize open-chromatin peaks
+for rare cell-types in single-cell ATAC-seq data.
 It trains a support vector classifier (SVC) using gapped-kmer kernels
 (Ghandi et al., 2014; Lee, 2016), and learns sequence features that modulate
 gene expressions. We use LIBSVM (Chang & Lin 2011) for implementing SVC.
