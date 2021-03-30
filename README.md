@@ -69,7 +69,7 @@ Based on the gkmQC-AUC of peak subsets
 called from original and relaxed threshold of MACS2,
 gkmQC optimizes the threshold of peak-calling.
 Consequently, gkmQC recovers uncalled peaks
-due to the insufficient reads for rare-cells.
+due to the insufficient reads mapped to rare cell-types.
 
 Optimize your called peaks with gkmQC AUC scores.
 ```bash
