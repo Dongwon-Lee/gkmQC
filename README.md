@@ -1,6 +1,6 @@
 ## gkmQC: gapped k-mer-SVM quality check and optimization
 
-<img src="./gkmQC_concept.png" width="597" height="733" /> 
+<img align="center" src="./gkmQC_concept_rev.png" width="597" height="733" /> 
 
 gkmQC is a sequence-based quality assessment and refinement of
 chromatin accessibility data using gkm-SVM.
