@@ -49,20 +49,6 @@ const char *gkm_check_parameter(const gkm_parameter *param)
 * Main Wrapper Function
 */
 
-typedef struct _gkmOpt {
-    int kernel_type;
-    int L;
-    int k;
-    int d;
-    u_int8_t M;
-    double H;
-    double gamma;
-    char *posfile;
-    char *negfile;
-    int nthreads;
-    int verbosity;
-} gkmOpt;
-
 static void *pthread_gkmkernel_kernelfunc_batch_all(void *ptr)
 {
     int i;

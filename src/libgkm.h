@@ -46,6 +46,7 @@ typedef struct _gkm_parameter gkm_parameter;
 typedef struct _gkm_data gkm_data;
 typedef struct _svm_problem svm_problem;
 typedef struct _gkm_kernel gkm_kernel;
+typedef struct _gkmOpt gkmOpt;
 
 enum { GKM, EST_FULL, EST_TRUNC, EST_TRUNC_RBF, EST_TRUNC_PW, EST_TRUNC_PW_RBF}; /* kernel_type */
 
@@ -145,7 +146,22 @@ void gkmkernel_swap_index(gkm_kernel *kernel, int i, int j);
 void gkmkernel_update_index(gkm_kernel *kernel);
 double* gkmkernel_kernelfunc_batch_all(gkm_kernel *kernel, const int a, const int start, const int end, double *res);
 
+struct _gkmOpt {
+    int kernel_type;
+    int L;
+    int k;
+    int d;
+    u_int8_t M;
+    double H;
+    double gamma;
+    char *posfile;
+    char *negfile;
+    int nthreads;
+    int verbosity;
+};
 
+
+int gkm_main_pywrapper(gkmOpt *opts, double **kmat, int *kmat_size);
 #ifdef __cplusplus
 }
 #endif
