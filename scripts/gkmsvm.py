@@ -151,6 +151,9 @@ def crossValidate(args_svm, _kmat, n_pseqs, n_nseqs):
 
         pool = Pool(p)
         aucs = pool.map(pool_wrapper_svm_train, args_l)
+        pool.close()
+        pool.join()
+        logging.info("done cross-validation.")
         auc_score = np.mean(aucs)
         auc_std = np.std(aucs)
 
