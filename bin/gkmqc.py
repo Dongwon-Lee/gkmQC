@@ -59,6 +59,7 @@ def main():
     desc_nidx_txt = "Build genome index for generating null sequence"
     desc_eval_txt = "Evaluate peaks with AUCs of peak subsets"
     desc_optz_txt = "Optimize peaks with AUC-based thresholding"
+    desc_rept_txt = "Calculate gkmQC score and report gkmQC curve PDF"
 
     # init parser
     parser = argparse.ArgumentParser(description=desc_txt,
@@ -83,9 +84,15 @@ def main():
         description=desc_optz_txt,
         formatter_class=argparse.RawTextHelpFormatter)
 
+    subparser_rept = subparsers.add_parser('report',
+        help=desc_rept_txt,
+        description=desc_rept_txt,
+        formatter_class=argparse.RawTextHelpFormatter)
+
     subparser_nidx._action_groups.pop()
     subparser_eval._action_groups.pop()
     subparser_optz._action_groups.pop()
+    subparser_rept._action_groups.pop()
 
     # parser for the "buildidx" command
     group_req_nidx = subparser_nidx.add_argument_group('required arguments')
@@ -129,6 +136,11 @@ def main():
         help="Minimum of last AUC for optimization\n(default: 0.75)")
     group_opt_optz.add_argument("-a2", "--auc-min-coff", type=float, default=0.7,
         help="threshold of minimum AUC to sort out optimized peaks\n(default: 0.7)")
+
+    # parser for the "report" command
+    group_req_rept = subparser_rept.add_argument_group('required arguments')
+    group_req_rept.add_argument("-i", "--eval-file", type=str, required=True,
+        help="gkmqc-eval-file; *.gkmqc.eval.out")
 
     # parser for common (evalute, optimize)
     #for subparser_comm, group_opt in [(subparser_eval, group_opt_eval), (subparser_optz, group_opt_optz)]:
@@ -235,8 +247,10 @@ def main():
         HEADER += "\n#   GKMQC_PREFIX={0}".format(args.gkmqc_prefix)
         HEADER += "\n#   GKMQC_RT_PREFIX={0}".format(args.gkmqc_rt_prefix)
         HEADER += "\n#   AUC_START_OPT={0}".format(args.auc_start_opt)
-        HEADER += "\n#   AUC_MIN_COFF={0}".format(args.auc_min_coff)        
+        HEADER += "\n#   AUC_MIN_COFF={0}".format(args.auc_min_coff) 
 
+    if args.commands == "report":
+        HEADER += "\n#   EVAL_FILE={0}".format(args.eval_file)       
     
     #if args.commands == "evaluate" or args.commands == "optimize":
     if args.commands == "evaluate":
@@ -288,6 +302,7 @@ def main():
             os.mkdir(gkmqc_out_dir)
         
         # Copy peak file
+        args.peak_file = '"%s"' % args.peak_file
         os.system("cp %s %s" % (args.peak_file, gkmqc_out_dir))
 
         # Change Dir
@@ -363,6 +378,11 @@ def main():
         import optimize
         logging.info("optimize peaks with gkmQC-AUC profile")
         optimize.optimize_peaks(args)
+
+    if args.commands == "report":
+        import visualize
+        logging.info("report gkmQC scores and curves")
+        visualize.report(args)
 
 if __name__=='__main__':
     main()

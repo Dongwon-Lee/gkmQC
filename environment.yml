@@ -2,10 +2,11 @@ name: gkmqc
 
 dependencies:
   - pip
-  - python>=3.7
+  - python=3.7
   - bitarray
   - numpy
   - scikit-learn
+  - matplotlib
   - scipy
   - pip:
       - pyfasta

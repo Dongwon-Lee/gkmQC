@@ -56,6 +56,10 @@ Evaluate your called peaks and check your gkmQC curve.
 $ cd test
 $ ../bin/gkmqc.py evaluate -i foo.narrowPeak -g hg38 -n foo -@ [threads]
 $ cat foo.gkmqc/foo.gkmqc.eval.out
+$ ../bin/gkmqc.py report -i foo.gkmqc/foo.gkmqc.eval.out
+INFO: report gkmQC scores and curves
+INFO: gkmQC score = 100.000
+INFO: Curve PDF file has been created: ./test/foo.gkmqc.curve.pdf
 ```
 
 Especially, gkmQC enables us to optimize open-chromatin peaks

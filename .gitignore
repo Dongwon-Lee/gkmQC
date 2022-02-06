@@ -5,6 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
+*.o
 
 # Distribution / packaging
 .Python
@@ -130,3 +131,10 @@ dmypy.json
 
 # icon
 Icon*
+
+# folder
+.vscode/
+test/
+
+# OSX
+.DS_Store
