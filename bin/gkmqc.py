@@ -288,6 +288,7 @@ def main():
             os.mkdir(gkmqc_out_dir)
         
         # Copy peak file
+        args.peak_file = '"%s"' % args.peak_file
         os.system("cp %s %s" % (args.peak_file, gkmqc_out_dir))
 
         # Change Dir
