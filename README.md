@@ -35,7 +35,7 @@ $ make && make install
 
 To prepare null-seq index,\
 (1) download precalculated one:\
-[gkmqc.idx.hg38.tar.xz](https://www.dropbox.com/s/wtjylew5ybim29x/gkmqc.idx.hg38.tar.xz?dl=0) (5.8 GB), [gkmqc.idx.mm10.tar.xz](https://www.dropbox.com/s/qye3ts8jep78o3u/gkmqc.idx.mm10.tar.xz?dl=0) (4.5 GB)
+[gkmqc.idx.hg38.tar.xz](https://www.dropbox.com/scl/fi/koex9l5ywkyjkd7yfejex/gkmqc.idx.hg38.tar.xz?rlkey=8urc5nbgbqjd6crwtdsnroc6o&st=rboiiiqp&dl=0) (5.8 GB), [gkmqc.idx.mm10.tar.xz](https://www.dropbox.com/scl/fi/zk9jbbg9pjj2z1px2q0z8/gkmqc.idx.mm10.tar.xz?rlkey=rz9r3o0lyjgavykwry53zc99o&st=ur7gehqf&dl=0) (4.5 GB)
 ```bash
 $ cd data
 $ tar xvfJ gkmqc.idx.hg38.tar.xz
