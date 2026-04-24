@@ -19,14 +19,10 @@
 
 import os, random
 from bitarray import bitarray
-import seqs_nullgen
-from seqs_nullgen import bitarray_fromfile
+from . import seqs_nullgen
+from .seqs_nullgen import bitarray_fromfile
+from ._paths import base_data_dir
 import logging
-
-dir_this   = os.path.dirname(os.path.abspath(__file__))
-dir_prnt   = os.path.dirname(dir_this)
-base_data_dir = os.path.join(dir_prnt, "data")
-dir_scripts = os.path.join(dir_prnt, "scripts")
 
 def make_profile(bed_file, prof_file, genome_assembly):
     # load bit arraies
