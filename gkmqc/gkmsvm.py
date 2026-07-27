@@ -27,6 +27,7 @@ from sklearn.svm import SVC
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score
 from itertools import repeat
+import multiprocessing as mp
 from multiprocessing import Pool
 
 ##
@@ -160,7 +161,14 @@ def crossValidate(args_svm, _kmat, n_pseqs, n_nseqs):
             for trainIdx, testIdx in kf.split(seqids, y):
                 args_l.append((args_svm, y, trainIdx, testIdx))
 
-        pool = Pool(p)
+        # The workers read the kernel matrix from the module global set at
+        # the top of this function rather than receiving it as an argument:
+        # pickling a multi-GB matrix to every worker would cost far more
+        # than the fork. That sharing only works under the "fork" start
+        # method, so request it explicitly -- Python 3.14 made "forkserver"
+        # the Linux default, under which the child re-imports this module
+        # and the global is unset (NameError: kmat).
+        pool = mp.get_context("fork").Pool(p)
         aucs = pool.map(pool_wrapper_svm_train, args_l)
         pool.close()
         pool.join()
