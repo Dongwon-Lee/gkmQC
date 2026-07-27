@@ -61,6 +61,10 @@ setup(
         # call site this project uses.
         "pyfaidx",
     ],
+    extras_require={
+        # pip install -e ".[test]" && pytest tests/
+        "test": ["pytest"],
+    },
     entry_points={
         "console_scripts": [
             "gkmqc=gkmqc.cli:main",
