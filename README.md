@@ -15,9 +15,10 @@ requires
 
 * Python >=3.10
 * numpy
-* sklearn
+* scikit-learn
 * bitarray
 * pyfaidx
+* matplotlib
 
 Set conda virtual environment
 ```bash
@@ -77,6 +78,8 @@ Evaluate your called peaks and check your gkmQC curve.
 ```bash
 # run evaluate command; takes 1 ~ 2 hrs with 10 threads
 $ cd test
+# test/ has no data/ of its own, so point gkmQC at the index:
+$ export GKMQC_DATA_DIR=../data          # or pass -D ../data to evaluate
 $ gkmqc evaluate -i foo.narrowPeak -g hg38 -n foo -@ [threads]
 $ cat foo.gkmqc/foo.gkmqc.eval.out
 $ gkmqc report -i foo.gkmqc/foo.gkmqc.eval.out
@@ -108,12 +111,13 @@ $ gkmqc optimize -p1 foo -p2 foo_rc
 $ cat foo.gkmqc/foo.e300.optz.bed
 ```
 
-You can check the options with -h arg of gkmqc.
+You can check the options with the -h arg of the gkmqc command.
 ```bash
 $ gkmqc -h
 $ gkmqc buildidx -h # Building null-seq index
 $ gkmqc evaluate -h # run gkm-SVM to evaluate peaks
 $ gkmqc optimize -h # run gkmQC to optimize peaks
+$ gkmqc report -h   # report gkmQC scores and curves
 ```
 
 
