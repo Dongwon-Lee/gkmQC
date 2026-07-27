@@ -89,6 +89,14 @@ def set_data_dir(path=None, create_ok=False) -> str:
     else:
         _DATA_DIR = _resolve()
 
+    # Publish into the environment so multiprocessing workers inherit it.
+    # A module-level global does not survive the "spawn" and "forkserver"
+    # start methods -- the child re-imports this module and would resolve
+    # again from its own CWD, which by then is the gkmQC output directory
+    # (cli.py chdir()s there before the null-seq Pool runs). Python 3.14
+    # made "forkserver" the Linux default, so this is not hypothetical.
+    os.environ["GKMQC_DATA_DIR"] = _DATA_DIR
+
     return _DATA_DIR
 
 
