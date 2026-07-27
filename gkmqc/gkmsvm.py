@@ -32,13 +32,12 @@ from multiprocessing import Pool
 ##
 # nu-auc regressor
 ##
-from ._paths import base_data_dir
 # The C extension ``gkmkern_pylib.so`` is shipped as package data (see
 # setup.py) so it always sits next to this module regardless of how the
 # package was installed (source tree, wheel, editable).
 bin_dir = os.path.dirname(os.path.realpath(__file__))
 
-#f = open("%s/nu_auc_gb_regressor.pkl" % base_data_dir, "rb")
+#f = open("%s/nu_auc_gb_regressor.pkl" % get_data_dir(), "rb")
 #nu_auc_regressor = pickle.load(f)
 #f.close()
 
@@ -81,9 +80,20 @@ def computeGkmKernel(args_gkm):
     c_int_p = ctypes.POINTER(ctypes.c_int)
     narr_p = narr.ctypes.data_as(c_int_p)
 
-    # call ctype func in ../bin/GkmKernel.so
-    
-    _gkmkern_pylib = np.ctypeslib.load_library("gkmkern_pylib.so", bin_dir)
+    # call ctype func in the packaged gkmkern_pylib.so
+
+    try:
+        _gkmkern_pylib = np.ctypeslib.load_library("gkmkern_pylib.so", bin_dir)
+    except OSError as err:
+        raise RuntimeError(
+            "gkmkern_pylib.so not found in %s (%s).\n"
+            "Build the C library and reinstall, in this order:\n"
+            "    cd src && make && make install\n"
+            "    pip install .\n"
+            "'make install' copies the .so into the gkmqc package, and "
+            "'pip install' ships it as package data -- running them the "
+            "other way round installs a package with no C library."
+            % (bin_dir, err))
     _gkmkern_pylib.gkm_main_pywrapper.restype = ctypes.c_int
     _gkmkern_pylib.gkm_main_pywrapper.argtypes = (ctypes.POINTER(gkmOpt), array_2d_double, c_int_p)
     ret = _gkmkern_pylib.gkm_main_pywrapper(opts, kmat_p, narr_p)

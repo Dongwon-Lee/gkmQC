@@ -26,13 +26,13 @@ import zipfile, tarfile
 import random
 
 from bitarray import bitarray
-from pyfaidx import Fasta
+from pyfaidx import Fasta, Faidx
 import numpy as np
 from multiprocessing import Pool
 from collections.abc import Iterable
 import logging
 
-from ._paths import base_data_dir
+from ._paths import get_data_dir
 
 ##
 # load .bit files (bit array - gc, rp, na)
@@ -160,7 +160,20 @@ def _proc_build_idx_func(fn, t, prefix_dir):
     chr = '.'.join(os.path.basename(fn).split('.')[:-1])
     barr_list = per_chrom_idx_bits(fn, prefix_dir, chr)
     per_chrom_nidx_l(fn, prefix_dir, chr, t, barr_list)
-    
+
+    # Build the pyfaidx .fai now, while we are the only writer. Otherwise
+    # the first "evaluate" run builds it lazily, and two concurrent runs
+    # against a shared data dir can race writing the same index.
+    # per_chrom_idx_bits() has already renamed fn into <prefix_dir>/fa/.
+    fa_fn = os.path.join(prefix_dir, 'fa', os.path.basename(fn))
+    if not os.path.isfile(fa_fn + '.fai'):
+        logging.info("build fasta index (.fai) for %s", chr)
+        try:
+            Faidx(fa_fn).close()
+        except OSError as err:
+            # Not fatal: "evaluate" rebuilds it on demand.
+            logging.warning("could not write %s.fai: %s", fa_fn, err)
+
     return 0 # dummy output
 
 def pool_wrapper_nidx_build(args):
@@ -176,10 +189,9 @@ def build_nullseq_index(args_nidx):
     prefix = args_nidx[1]      # name of genome assembly (e.g., hg38)
     t = args_nidx[2]           # size of window (e.g., 600bp)
     p = args_nidx[3]           # processes (< # of total chromosomes)
-    prefix_dir = '%s/%s' % (base_data_dir, prefix)
+    prefix_dir = '%s/%s' % (get_data_dir(), prefix)
 
-    if not os.path.isdir(prefix_dir):
-        os.mkdir(prefix_dir)
+    os.makedirs(prefix_dir, exist_ok=True)
 
     fseq_dir = prefix_dir + '/fa'
     if not os.path.isdir(fseq_dir):
@@ -264,21 +276,21 @@ def _per_chrom_sample_nullseq_idx(pos_posi_l, genome, chrom, t, p, fold, gc_marg
     
     # load bit array
     #print("loading bit array: gc, np, na")
-    idxf_gc = os.path.join(base_data_dir, '%s/bit/%s' % (genome, '.'.join([chrom, 'cg', 'bit'])))
-    idxf_rp = os.path.join(base_data_dir, '%s/bit/%s' % (genome, '.'.join([chrom, 'rp', 'bit'])))
-    idxf_na = os.path.join(base_data_dir, '%s/bit/%s' % (genome, '.'.join([chrom, 'na', 'bit'])))
+    idxf_gc = os.path.join(get_data_dir(), '%s/bit/%s' % (genome, '.'.join([chrom, 'cg', 'bit'])))
+    idxf_rp = os.path.join(get_data_dir(), '%s/bit/%s' % (genome, '.'.join([chrom, 'rp', 'bit'])))
+    idxf_na = os.path.join(get_data_dir(), '%s/bit/%s' % (genome, '.'.join([chrom, 'na', 'bit'])))
     gc_arr, _ = bitarray_fromfile(idxf_gc)
     rp_arr, _ = bitarray_fromfile(idxf_rp)
     na_arr, _ = bitarray_fromfile(idxf_na)
 
     # load nullseq_idx pos and ptr mat
     try:
-        nidx_ptr_fn = os.path.join(base_data_dir, '%s/nidx_t%d/%s_ptr.npz' % (genome, t, chrom))
+        nidx_ptr_fn = os.path.join(get_data_dir(), '%s/nidx_t%d/%s_ptr.npz' % (genome, t, chrom))
         nidx_ptr_d = np.load(nidx_ptr_fn)
         nidx_ptr = nidx_ptr_d['ptr']
         n = nidx_ptr_d['len']
 
-        nidx_pos_fn = os.path.join(base_data_dir, '%s/nidx_t%d/%s_pos.npy' % (genome, t, chrom))
+        nidx_pos_fn = os.path.join(get_data_dir(), '%s/nidx_t%d/%s_pos.npy' % (genome, t, chrom))
         nidx_pos = np.memmap(nidx_pos_fn, dtype="int32", mode="r", shape=(n,))
 
     except IOError as err:
@@ -455,7 +467,7 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
         logging.info(chrom)
         # load fasta object (pyfaidx returns a Sequence from slicing;
         # str() materialises the underlying sequence string).
-        chr_fa = os.path.join(base_data_dir, '%s/fa/%s.fa' % (genome, chrom))
+        chr_fa = os.path.join(get_data_dir(), '%s/fa/%s.fa' % (genome, chrom))
         f = Fasta(chr_fa)[chrom]
 
         # write fa to files

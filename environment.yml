@@ -2,7 +2,9 @@ name: gkmqc
 
 dependencies:
   - pip
-  - python=3.7
+  # Floor, not a pin: conda resolves to the newest compatible Python.
+  # 3.10 is the oldest release the current dependency stack installs on.
+  - python>=3.10
   - bitarray
   - numpy
   - scikit-learn

@@ -13,7 +13,7 @@ gene expressions. We use LIBSVM (Chang & Lin 2011) for implementing SVC.
 
 requires
 
-* Python >=3.7
+* Python >=3.10
 * numpy
 * sklearn
 * bitarray
@@ -26,7 +26,10 @@ $ conda activate gkmqc
 ```
 
 
-Please compile C library for gkm-kernel and install the Python package
+Please compile C library for gkm-kernel and install the Python package.
+The order matters: `make install` copies `gkmkern_pylib.so` into the
+`gkmqc` package, and `pip install` then ships it as package data.
+Running `pip install` first installs a package with no C library.
 ```bash
 $ cd src
 $ make && make install
@@ -34,8 +37,8 @@ $ cd ..
 $ pip install .        # or `pip install -e .` for an editable install
 ```
 
-After `pip install`, the `gkmqc` command (alias: `gkmqc.py`) is on the
-env's PATH — you can invoke it from any working directory.
+After `pip install`, the `gkmqc` command is on the env's PATH — you can
+invoke it from any working directory.
 
 
 To prepare null-seq index,\
@@ -54,12 +57,20 @@ $ cd data
 $ gkmqc buildidx -i hg38.chromFa.tar.gz -g hg38 -@ [threads]
 ```
 
-gkmQC looks for its index under `$GKMQC_DATA_DIR` (if set) or `./data`
-(the CWD), letting you run the commands below from anywhere:
+gkmQC resolves its data directory in this order: the `-D/--data-dir`
+option, then `$GKMQC_DATA_DIR`, then `./data` under the current
+directory, then the current directory itself when it is named `data`.
+If none of those resolve, it stops with an error rather than guessing.
+
+`buildidx` and `evaluate` accept `-D`; `optimize` and `report` do not
+need it. To run from anywhere without passing `-D` every time:
 
 ```bash
 $ export GKMQC_DATA_DIR=/path/to/gkmQC/data
 ```
+
+The `cd test` flow below needs `-D` or `$GKMQC_DATA_DIR`, since `test/`
+contains no `data/` of its own.
 
 
 Evaluate your called peaks and check your gkmQC curve.

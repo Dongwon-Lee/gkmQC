@@ -26,6 +26,7 @@ import logging
 import numpy as np
 
 from . import __version__
+from . import _paths
 
 # The SLURM sbatch wrapper (``gkmsvm_slurm.sh``) ships as package data
 # next to the Python modules so it's discoverable regardless of how the
@@ -104,7 +105,11 @@ def main():
         help="size of scanning window\n(default: 600bp)")
     group_opt_nidx.add_argument("-@", "--n-processes", type=int, default=1,
         help="number of processes\n(default: 1)")
-    
+    group_opt_nidx.add_argument("-D", "--data-dir", type=str, default=None,
+        help="gkmQC data directory to build the index into\n"
+             "(default: $GKMQC_DATA_DIR, else ./data,\n"
+             "else the current directory if it is named 'data')")
+
     # parser for the "evaluate" command
     group_req_eval = subparser_eval.add_argument_group('required arguments')
     group_req_eval.add_argument("-i", "--peak-file", type=str, required=True,
@@ -115,6 +120,10 @@ def main():
         help="prefix used in 'buildidx' command for genome-indexing.")
 
     group_opt_eval = subparser_eval.add_argument_group('optional arguments\nbase')
+    group_opt_eval.add_argument("-D", "--data-dir", type=str, default=None,
+        help="gkmQC data directory holding the null-seq index\n"
+             "(default: $GKMQC_DATA_DIR, else ./data,\n"
+             "else the current directory if it is named 'data')")
     group_opt_eval.add_argument("-rs", "--rank-start", type=int, default=1,
         help="rank number of peak subsets to start evaluation\n(default: 1)")
     group_opt_eval.add_argument("-re", "--rank-end", type=int, default=20,
@@ -216,6 +225,16 @@ def main():
             help="fast estimation of AUC without nCV:\nusing nu score from trained SVM\n(default: 0)")
         
     args = parser.parse_args()
+
+    # Resolve the data directory now, while the CWD is still the one the
+    # user invoked gkmQC from -- the "evaluate" path chdir()s into the
+    # output directory further down. Only these two commands touch it;
+    # "optimize" and "report" have no --data-dir and would AttributeError.
+    # "buildidx" may create the directory it is pointed at; "evaluate"
+    # requires one that already exists.
+    if args.commands in ("buildidx", "evaluate"):
+        _paths.set_data_dir(args.data_dir,
+            create_ok=(args.commands == "buildidx"))
 
     # formatting compatible with clog
     logfmt_str = '%(levelname)s %(asctime)s: %(message)s'

@@ -37,5 +37,6 @@ install:
 	    cp gkmkern $$CONDA_PREFIX/bin/; \
 	else \
 	    echo "installing gkmkern into ../bin (no CONDA_PREFIX detected)"; \
+	    mkdir -p ../bin; \
 	    cp gkmkern ../bin/; \
 	fi
