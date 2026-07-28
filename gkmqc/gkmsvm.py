@@ -27,18 +27,18 @@ from sklearn.svm import SVC
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score
 from itertools import repeat
+import multiprocessing as mp
 from multiprocessing import Pool
 
 ##
 # nu-auc regressor
 ##
-from ._paths import base_data_dir
 # The C extension ``gkmkern_pylib.so`` is shipped as package data (see
 # setup.py) so it always sits next to this module regardless of how the
 # package was installed (source tree, wheel, editable).
 bin_dir = os.path.dirname(os.path.realpath(__file__))
 
-#f = open("%s/nu_auc_gb_regressor.pkl" % base_data_dir, "rb")
+#f = open("%s/nu_auc_gb_regressor.pkl" % get_data_dir(), "rb")
 #nu_auc_regressor = pickle.load(f)
 #f.close()
 
@@ -81,9 +81,20 @@ def computeGkmKernel(args_gkm):
     c_int_p = ctypes.POINTER(ctypes.c_int)
     narr_p = narr.ctypes.data_as(c_int_p)
 
-    # call ctype func in ../bin/GkmKernel.so
-    
-    _gkmkern_pylib = np.ctypeslib.load_library("gkmkern_pylib.so", bin_dir)
+    # call ctype func in the packaged gkmkern_pylib.so
+
+    try:
+        _gkmkern_pylib = np.ctypeslib.load_library("gkmkern_pylib.so", bin_dir)
+    except OSError as err:
+        raise RuntimeError(
+            "gkmkern_pylib.so not found in %s (%s).\n"
+            "Build the C library and reinstall, in this order:\n"
+            "    cd src && make && make install\n"
+            "    pip install .\n"
+            "'make install' copies the .so into the gkmqc package, and "
+            "'pip install' ships it as package data -- running them the "
+            "other way round installs a package with no C library."
+            % (bin_dir, err))
     _gkmkern_pylib.gkm_main_pywrapper.restype = ctypes.c_int
     _gkmkern_pylib.gkm_main_pywrapper.argtypes = (ctypes.POINTER(gkmOpt), array_2d_double, c_int_p)
     ret = _gkmkern_pylib.gkm_main_pywrapper(opts, kmat_p, narr_p)
@@ -150,7 +161,14 @@ def crossValidate(args_svm, _kmat, n_pseqs, n_nseqs):
             for trainIdx, testIdx in kf.split(seqids, y):
                 args_l.append((args_svm, y, trainIdx, testIdx))
 
-        pool = Pool(p)
+        # The workers read the kernel matrix from the module global set at
+        # the top of this function rather than receiving it as an argument:
+        # pickling a multi-GB matrix to every worker would cost far more
+        # than the fork. That sharing only works under the "fork" start
+        # method, so request it explicitly -- Python 3.14 made "forkserver"
+        # the Linux default, under which the child re-imports this module
+        # and the global is unset (NameError: kmat).
+        pool = mp.get_context("fork").Pool(p)
         aucs = pool.map(pool_wrapper_svm_train, args_l)
         pool.close()
         pool.join()

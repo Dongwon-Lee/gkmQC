@@ -12,17 +12,35 @@ standalone ``gkmkern`` CLI into ``$CONDA_PREFIX/bin`` (or ``bin/`` for
 non-conda flows).
 """
 
+import os
+import re
+
 from setuptools import setup, find_packages
+
+
+def _version():
+    """Single-source the version from gkmqc/__init__.py.
+
+    Read rather than imported: importing the package at build time would
+    pull in numpy/pyfaidx before install_requires has been satisfied.
+    """
+    init = os.path.join(os.path.dirname(__file__), "gkmqc", "__init__.py")
+    with open(init) as fh:
+        m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', fh.read(), re.M)
+    if not m:
+        raise RuntimeError("could not find __version__ in %s" % init)
+    return m.group(1)
+
 
 setup(
     name="gkmqc",
-    version="1.0.0",
+    version=_version(),
     description="gkmQC: gapped k-mer-SVM quality check for chromatin accessibility data",
     author="Seong Kyu Han, Dongwon Lee",
     author_email="dongwon.lee@childrens.harvard.edu",
     url="https://github.com/Dongwon-Lee/gkmQC",
     license="GPLv3",
-    python_requires=">=3.7",
+    python_requires=">=3.10",
     packages=find_packages(include=["gkmqc", "gkmqc.*"]),
     package_data={
         # Ship the compiled C kernel and the SLURM sbatch wrapper
@@ -43,6 +61,10 @@ setup(
         # call site this project uses.
         "pyfaidx",
     ],
+    extras_require={
+        # pip install -e ".[test]" && pytest tests/
+        "test": ["pytest"],
+    },
     entry_points={
         "console_scripts": [
             "gkmqc=gkmqc.cli:main",

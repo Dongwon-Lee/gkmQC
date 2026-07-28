@@ -21,7 +21,7 @@ import os, random
 from bitarray import bitarray
 from . import seqs_nullgen
 from .seqs_nullgen import bitarray_fromfile
-from ._paths import base_data_dir
+from ._paths import get_data_dir
 import logging
 
 def make_profile(bed_file, prof_file, genome_assembly):
@@ -31,7 +31,7 @@ def make_profile(bed_file, prof_file, genome_assembly):
     arr_na_dic = {}
 
     def get_bit_array(genome_assembly, chr, pr):
-        bit_dir = os.path.join(os.path.join(base_data_dir, genome_assembly, "bit"))
+        bit_dir = os.path.join(os.path.join(get_data_dir(), genome_assembly, "bit"))
         return bitarray_fromfile(os.path.join(bit_dir, "%s.%s.bit" % (chr, pr)))[0]
 
     f = open(bed_file)
