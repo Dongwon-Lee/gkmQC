@@ -53,3 +53,9 @@ Existing scripts and pipelines need updating:
 - The precomputed index tarballs still ship `pyfasta`'s `.flat`/`.gdx` files and no `.fai`;
   `pyfaidx` builds the `.fai` on first use, which requires the reference directory to be
   writable. Regenerating the tarballs is planned.
+
+- On Python older than 3.13, `pytest tests/` reports one failure in
+  `test_cli.py::test_data_dir_uses_capital_d`. This is a defect in the test, not in gkmQC:
+  the test matched `argparse`'s help layout, which changed in 3.13 (`-D DATA_DIR,
+  --data-dir DATA_DIR` before, `-D, --data-dir DATA_DIR` after). The flags themselves are
+  correct on every supported version. Fixed on `main` after this tag.

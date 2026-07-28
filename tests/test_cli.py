@@ -33,10 +33,15 @@ def test_data_dir_uses_capital_d(tmp_path, run_cli):
 
     argparse would raise on a genuine collision, but this pins the intent
     so nobody "tidies" it to lowercase later.
+
+    The metavar is optional in the pattern because argparse changed how it
+    renders short/long pairs: up to 3.12 it repeats the metavar after each
+    form ("-D DATA_DIR, --data-dir DATA_DIR"), from 3.13 it prints it once
+    ("-D, --data-dir DATA_DIR").
     """
     proc = run_cli(["evaluate", "-h"], cwd=tmp_path)
-    assert re.search(r"-D, --data-dir", proc.stdout), proc.stdout
-    assert re.search(r"-d, --max-num-gaps", proc.stdout), proc.stdout
+    assert re.search(r"-D(?: \S+)?, --data-dir", proc.stdout), proc.stdout
+    assert re.search(r"-d(?: \S+)?, --max-num-gaps", proc.stdout), proc.stdout
 
 
 def test_version_is_single_sourced(tmp_path, run_cli):
