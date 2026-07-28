@@ -32,10 +32,11 @@ from multiprocessing import Pool
 ##
 # nu-auc regressor
 ##
-dir_this   = os.path.dirname(os.path.abspath(__file__))
-dir_prnt   = os.path.dirname(dir_this)
-base_data_dir = os.path.join(dir_prnt, "data")
-bin_dir = os.path.join(dir_prnt, "bin")
+from ._paths import base_data_dir
+# The C extension ``gkmkern_pylib.so`` is shipped as package data (see
+# setup.py) so it always sits next to this module regardless of how the
+# package was installed (source tree, wheel, editable).
+bin_dir = os.path.dirname(os.path.realpath(__file__))
 
 #f = open("%s/nu_auc_gb_regressor.pkl" % base_data_dir, "rb")
 #nu_auc_regressor = pickle.load(f)

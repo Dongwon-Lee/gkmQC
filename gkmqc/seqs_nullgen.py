@@ -26,15 +26,13 @@ import zipfile, tarfile
 import random
 
 from bitarray import bitarray
-from pyfasta import Fasta
+from pyfaidx import Fasta
 import numpy as np
 from multiprocessing import Pool
 from collections.abc import Iterable
 import logging
 
-dir_this   = os.path.dirname(os.path.abspath(__file__))
-dir_prnt   = os.path.dirname(dir_this)
-base_data_dir = os.path.join(dir_prnt, "data")
+from ._paths import base_data_dir
 
 ##
 # load .bit files (bit array - gc, rp, na)
@@ -455,18 +453,19 @@ def fetch_nullseq_beds(pos_bed_files, neg_bed_files, args_fetch_nb):
     fo_l = list(map(lambda x: open(x, "w"), fa_files))
     for pos_posi_l, (chrom, neg_posi_l) in zip(positive_l, results_l):
         logging.info(chrom)
-        # load fasta object
+        # load fasta object (pyfaidx returns a Sequence from slicing;
+        # str() materialises the underlying sequence string).
         chr_fa = os.path.join(base_data_dir, '%s/fa/%s.fa' % (genome, chrom))
         f = Fasta(chr_fa)[chrom]
 
         # write fa to files
         for pos_posi, (i, neg_posi) in zip(pos_posi_l, neg_posi_l):
             for x in pos_posi:
-                outstr = ">%s:%d-%d\n%s\n\n" % (chrom, x+1, x+t, f[x:x+t].upper())
+                outstr = ">%s:%d-%d\n%s\n\n" % (chrom, x+1, x+t, str(f[x:x+t]).upper())
                 fo_l[i].write(outstr)
 
             for x in sorted(neg_posi):
-                outstr = ">%s:%d-%d\n%s\n\n" % (chrom, x+1, x+t, f[x:x+t].upper())
+                outstr = ">%s:%d-%d\n%s\n\n" % (chrom, x+1, x+t, str(f[x:x+t]).upper())
                 fo_l[i+len(pos_bed_files)].write(outstr)
 
     for fo in fo_l:
@@ -477,7 +476,7 @@ import argparse
 def main():
     desc_txt = "\n".join([
         "fast random sequence generator",
-        "using pyfasta, memory mapping technique",
+        "using pyfaidx, memory mapping technique",
         "-- Seong Kyu Han (seongkyu.han@childrens.harvard.edu),",
         "-- Dongwon Lee (dongwon.lee@childrens.harvard.edu)"
     ])

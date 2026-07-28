@@ -9,4 +9,7 @@ dependencies:
   - matplotlib
   - scipy
   - pip:
-      - pyfasta
+      # pyfasta (the previous FASTA reader) is unmaintained Python-2
+      # code; pyfaidx is the maintained equivalent and a drop-in for
+      # the one call site this project uses.
+      - pyfaidx

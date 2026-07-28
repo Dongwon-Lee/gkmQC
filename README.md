@@ -11,13 +11,13 @@ It trains a support vector classifier (SVC) using gapped-kmer kernels
 gene expressions. We use LIBSVM (Chang & Lin 2011) for implementing SVC.
 
 
-requires 
+requires
 
-* Python >=3
+* Python >=3.7
 * numpy
 * sklearn
 * bitarray
-* pyfasta
+* pyfaidx
 
 Set conda virtual environment
 ```bash
@@ -26,11 +26,16 @@ $ conda activate gkmqc
 ```
 
 
-Please compile C library for gkm-kernel
+Please compile C library for gkm-kernel and install the Python package
 ```bash
 $ cd src
 $ make && make install
+$ cd ..
+$ pip install .        # or `pip install -e .` for an editable install
 ```
+
+After `pip install`, the `gkmqc` command (alias: `gkmqc.py`) is on the
+env's PATH — you can invoke it from any working directory.
 
 
 To prepare null-seq index,\
@@ -46,7 +51,14 @@ $ tar xvfJ gkmqc.idx.hg38.tar.xz
 ```bash
 $ cd data
 # run buildindx command; takes 15 mins with 10 threads
-$ ../bin/gkmqc.py buildidx -i hg38.chromFa.tar.gz -g hg38 -@ [threads]
+$ gkmqc buildidx -i hg38.chromFa.tar.gz -g hg38 -@ [threads]
+```
+
+gkmQC looks for its index under `$GKMQC_DATA_DIR` (if set) or `./data`
+(the CWD), letting you run the commands below from anywhere:
+
+```bash
+$ export GKMQC_DATA_DIR=/path/to/gkmQC/data
 ```
 
 
@@ -54,9 +66,9 @@ Evaluate your called peaks and check your gkmQC curve.
 ```bash
 # run evaluate command; takes 1 ~ 2 hrs with 10 threads
 $ cd test
-$ ../bin/gkmqc.py evaluate -i foo.narrowPeak -g hg38 -n foo -@ [threads]
+$ gkmqc evaluate -i foo.narrowPeak -g hg38 -n foo -@ [threads]
 $ cat foo.gkmqc/foo.gkmqc.eval.out
-$ ../bin/gkmqc.py report -i foo.gkmqc/foo.gkmqc.eval.out
+$ gkmqc report -i foo.gkmqc/foo.gkmqc.eval.out
 INFO: report gkmQC scores and curves
 INFO: gkmQC score = 100.000
 INFO: Curve PDF file has been created: ./test/foo.gkmqc.curve.pdf
@@ -81,17 +93,16 @@ Optimize your called peaks with gkmQC AUC scores.
 # requires gkmQC results of called peaks with original and relaxed cut-off
 # foo, foo_rc: prefixs of gkmQC result with peaks from either original, relaxed cut-off
 $ cd test
-$ ../bin/gkmqc.py optimize -p1 foo -p2 foo_rc
+$ gkmqc optimize -p1 foo -p2 foo_rc
 $ cat foo.gkmqc/foo.e300.optz.bed
 ```
 
-You can check the options with -h arg of gkmqc.py
+You can check the options with -h arg of gkmqc.
 ```bash
-$ cd bin
-$ ./gkmqc.py -h
-$ ./gkmqc.py buildidx -h # Building null-seq index
-$ ./gkmqc.py evaluate -h # run gkm-SVM to evaluate peaks
-$ ./gkmqc.py optimize -h # run gkmQC to optimize peaks
+$ gkmqc -h
+$ gkmqc buildidx -h # Building null-seq index
+$ gkmqc evaluate -h # run gkm-SVM to evaluate peaks
+$ gkmqc optimize -h # run gkmQC to optimize peaks
 ```
 
 

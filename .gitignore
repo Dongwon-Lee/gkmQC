@@ -7,6 +7,10 @@ __pycache__/
 *.so
 *.o
 
+# Compiled gkm-kernel CLI (produced by `cd src && make`)
+bin/gkmkern
+src/gkmkern
+
 # Distribution / packaging
 .Python
 build/

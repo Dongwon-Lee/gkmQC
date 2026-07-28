@@ -25,14 +25,12 @@ import pickle
 import logging
 import numpy as np
 
-__version__ = '1.0.0'
+from . import __version__
 
-# namespacing script dir
-dir_this   = os.path.dirname(os.path.abspath(__file__))
-dir_prnt   = os.path.dirname(dir_this)
-dir_scripts = os.path.join(dir_prnt, "scripts")
-dir_data = os.path.join(dir_prnt, "data")
-sys.path.append(dir_scripts)
+# The SLURM sbatch wrapper (``gkmsvm_slurm.sh``) ships as package data
+# next to the Python modules so it's discoverable regardless of how the
+# package was installed (editable, wheel, source tree).
+dir_scripts = os.path.dirname(os.path.realpath(__file__))
 
 HEADER  = "\n# ==========================================="
 HEADER += "\n#   gapped k-mer-SVM Quality Check (gkmQC)"
@@ -286,7 +284,7 @@ def main():
     logging.info(HEADER) 
 
     # output files
-    import seqs_nullgen
+    from . import seqs_nullgen
 
     if args.commands == "buildidx":
         logging.info("build null seq index")
@@ -310,7 +308,7 @@ def main():
         os.chdir(gkmqc_out_dir)
         
         # preprocess peaks
-        import preprocess
+        from . import preprocess
 
         logging.info("QC and make a positive set")
         preprocess.make_qc_posset(gkmqc_out_dir, args)
@@ -337,7 +335,7 @@ def main():
         logging.info("cross-validation with gkm-SVM")
         if args.gkmsvm_mpi == 'none':
             logging.info("job schedular: none")
-            import gkmsvm
+            from . import gkmsvm
             for pos_fa, neg_fa in zip(pos_fa_files, neg_fa_files):
                 print("cv: %s vs %s" % (pos_fa, neg_fa))
                 gkmsvm.init(pos_fa, neg_fa, args)
@@ -346,7 +344,10 @@ def main():
         elif args.gkmsvm_mpi == 'slurm':
             logging.info("job schedular: slurm")
             sbatch_exe = os.path.join(dir_scripts, "gkmsvm_slurm.sh")
-            gkmsvm_py  = os.path.join(dir_scripts, "gkmsvm.py")
+            # Invoke gkmsvm as an installed module ("python -m gkmqc.gkmsvm")
+            # so the slurm worker picks up the same package env activated by
+            # gkmsvm_slurm.sh ("source activate gkmqc").
+            gkmsvm_invocation = "%s -m gkmqc.gkmsvm" % sys.executable
             gkmsvm_args = [
                 "-w", "-s", "-@", "-v",
                 "-t", "-L", "-k", "-d", "-M", "-H", "-G",
@@ -357,7 +358,7 @@ def main():
                 args.kernel_type, args.full_word_length, args.non_gap_length,
                 args.max_num_gaps, args.init_decay, args.half_life_decay,
                 args.rbf_gamma, args.regularization, args.precision, args.shrinking,
-                args.cache_size, args.ncv, args.repeats, args.fast_estimation   
+                args.cache_size, args.ncv, args.repeats, args.fast_estimation
             ]
             gkmsvm_vals = list(map(str, gkmsvm_vals))
             args_vals_pairs = map(lambda x: ' '.join(x), list(zip(gkmsvm_args, gkmsvm_vals)))
@@ -365,7 +366,7 @@ def main():
             print(argc)
             for pos_fa, neg_fa in zip(pos_fa_files, neg_fa_files):
                 os.system("sbatch --cpus-per-task=%d %s %s -p %s -n %s %s" %\
-                (args.n_processes, sbatch_exe, gkmsvm_py, pos_fa, neg_fa, argc))
+                (args.n_processes, sbatch_exe, gkmsvm_invocation, pos_fa, neg_fa, argc))
                 time.sleep(0.5)
         else:
             logging.error("no available option for the job schedular")
@@ -375,12 +376,12 @@ def main():
         os.chdir(curdir)
 
     if args.commands == "optimize":
-        import optimize
+        from . import optimize
         logging.info("optimize peaks with gkmQC-AUC profile")
         optimize.optimize_peaks(args)
 
     if args.commands == "report":
-        import visualize
+        from . import visualize
         logging.info("report gkmQC scores and curves")
         visualize.report(args)
 
